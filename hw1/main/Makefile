@@ -2,7 +2,7 @@ CC = mpicc
 CXX = mpicxx
 CXXFLAGS = -O3 -lm
 CFLAGS = -O3 -lm
-TARGETS = mpiio
+TARGETS = hw1
 
 .PHONY: all
 all: $(TARGETS)
