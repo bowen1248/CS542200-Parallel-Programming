@@ -32,10 +32,7 @@ float * sort_left_half (float * arr1, float * arr2, float * result, int arr1_len
     // }
     // printf("---rank %d, arr2---\n", rank);
     for (int i = 0; i < arr1_len; i++) {
-        if (index1 >= arr1_len) {
-            result[i] = arr2[index2];
-            index2++;
-        } else if (index2 >= arr2_len){
+        if (index2 >= arr2_len){
             result[i] = arr1[index1];
             index1++;
         } else if (arr1[index1] > arr2[index2]) {
@@ -76,14 +73,9 @@ float * sort_right_half (float * arr1, float * arr2, float * result, int arr1_le
     // }
     // printf("---rank %d, arr2---\n", rank);
     for (int i = (arr1_len - 1); i >= 0; i--) {
-        if (arr1[index1] == INFINITY || index1 < 0) {
-            result[i] = arr2[index2];
-            index2--;
-            index1--;
-        } else if (arr2[index2] == INFINITY || index2 < 0){
+        if (index2 < 0){
             result[i] = arr1[index1];
             index1--;
-            index2--;
         } else if (arr1[index1] > arr2[index2]) {
             result[i] = arr1[index1];
             index1--;
@@ -106,7 +98,6 @@ int main (int argc, char **argv)
     MPI_Init(&argc, &argv);
 
     // Get current process rank
-    
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
@@ -166,7 +157,7 @@ int main (int argc, char **argv)
     // Get this process data's by its rank
     MPI_File_open(MPI_COMM_WORLD, input_filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &input_file);
     MPI_File_read_at(input_file, sizeof(float) * local_start_index, data, num_local_elem, MPI_FLOAT, MPI_STATUS_IGNORE);
-    MPI_File_close(&input_file);
+    // MPI_File_close(&input_file);
 
     // Sort local value by process
     if (num_local_elem >= 2) {
@@ -181,8 +172,8 @@ int main (int argc, char **argv)
     // Even and odd phases
     MPI_Status status;
     float * tmp = data;
-    MPI_Barrier(MPI_COMM_WORLD);
-    for (int i = 1; i < size; i++) {
+    
+    for (int i = 0; i <= (size / 2); i++) {
         // even phase
         if (size % 2 == 0 || size % 2 == 1 && rank != (size - 1)) {
             if (rank % 2 == 0) {
@@ -200,7 +191,7 @@ int main (int argc, char **argv)
             }
         }
 
-        MPI_Barrier(MPI_COMM_WORLD);
+        // MPI_Barrier(MPI_COMM_WORLD);
         // for (int j = 0; j < num_local_elem; j++) {
         //     printf("%f, ", data[j]);
         // }
@@ -223,7 +214,7 @@ int main (int argc, char **argv)
             }
         }
         
-        MPI_Barrier(MPI_COMM_WORLD);
+        // MPI_Barrier(MPI_COMM_WORLD);
         // for (int j = 0; j < num_local_elem; j++) {
         //     printf("%f, ", data[i]);
         // }
@@ -257,40 +248,9 @@ int main (int argc, char **argv)
 
     MPI_File_open(MPI_COMM_WORLD, output_filename, MPI_MODE_CREATE|MPI_MODE_WRONLY, MPI_INFO_NULL, &output_file);
     MPI_File_write_at(output_file, sizeof(float) * local_start_index, data, num_local_elem, MPI_FLOAT, MPI_STATUS_IGNORE);
-    MPI_File_close(&output_file);
-
-    // if (rank == 0) {
-    //     int ans[4] = {1, 2, 3, 4}; 
-    //     // float * ans = (float *) malloc(size * sizeof(float));
-    //     // MPI_Gatherv ( data, data_size, MPI_FLOAT,
-    //     //             ans, count, displs, MPI_FLOAT,
-    //     //             0, MPI_COMM_WORLD );
-    //     printf("fml, nigga");
-    //     // Write final result to output file
-    //     MPI_File_open(MPI_COMM_WORLD, output_filename, MPI_MODE_CREATE|MPI_MODE_WRONLY, MPI_INFO_NULL, &output_file);
-    //     MPI_File_write_at(output_file, 0, ans, n, MPI_FLOAT, MPI_STATUS_IGNORE);
-    //     MPI_File_close(&output_file);
-    // } else {
-    //     // MPI_Gatherv ( data, data_size, MPI_FLOAT,
-    //     //             NULL, NULL, NULL, MPI_FLOAT,
-    //     //             0, MPI_COMM_WORLD );
-        
-    // }
-
+    // MPI_File_close(&output_file);
 
     MPI_Finalize();
     return 0;
-
-    // Get current process rank / v
-    // Open input file / v
-    // Get input file size / v
-    // Get this process data's by its rank / v
-    // Sort local value by process / v
-    // Implement odd phase by comparing and sort to neighbor
-    // 1 -> 2 3 -> 4 5 -> 6 7
-        // two pointer
-    // Implement even phase by comparing and sort to neighbor
-    // 1 2 -> 3 4 -> 5 6 -> 7
-    // Organize to output
 }
 
