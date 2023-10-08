@@ -11,30 +11,34 @@ int compare (const void * a, const void * b) {
   return (fa > fb) - (fa < fb);
 }
 
-float * sort_left_half (float * arr1, float * arr2, float * result, int n) {
+float * sort_left_half (float * arr1, float * arr2, float * result, int arr1_len, int arr2_len) {
     int index1 = 0;
     int index2 = 0;
     
-    // for (int j = 0; j < n; j++) {
+    if (arr1_len == 0) {
+        return arr2;
+    }
+    if (arr2_len == 0) {
+        return arr1;
+    }
+
+    // for (int j = 0; j < arr1_len; j++) {
     //     printf("%f, ", arr1[j]);
     // }
     // printf("---rank %d, arr1---\n", rank);
 
-    // for (int j = 0; j < n; j++) {
+    // for (int j = 0; j < arr2_len; j++) {
     //     printf("%f, ", arr2[j]);
     // }
     // printf("---rank %d, arr2---\n", rank);
-    for (int i = 0; i < n; i++) {
-        if (arr1[index1] == INFINITY || index1 > n) {
+    for (int i = 0; i < arr1_len; i++) {
+        if (index1 >= arr1_len) {
             result[i] = arr2[index2];
             index2++;
-            index1++;
-        } else if (arr2[index2] == INFINITY || index2 > n){
+        } else if (index2 >= arr2_len){
             result[i] = arr1[index1];
             index1++;
-            index2++;
-        }
-        else if (arr1[index1] > arr2[index2]) {
+        } else if (arr1[index1] > arr2[index2]) {
             result[i] = arr2[index2];
             index2++;
         } else {
@@ -43,11 +47,7 @@ float * sort_left_half (float * arr1, float * arr2, float * result, int n) {
         }
     }
 
-    if (n == 0) {
-        result[0] = INFINITY;
-    }
-
-    // for (int j = 0; j < n; j++) {
+    // for (int j = 0; j < arr1_len; j++) {
     //     printf("%f, ", result[j]);
     // }
     //     printf("---rank %d, sort left---\n", rank);
@@ -55,20 +55,27 @@ float * sort_left_half (float * arr1, float * arr2, float * result, int n) {
     return result;
 }
 
-float * sort_right_half (float * arr1, float * arr2, float * result, int n) {
-    int index1 = n - 1;
-    int index2 = n - 1;
+float * sort_right_half (float * arr1, float * arr2, float * result, int arr1_len, int arr2_len) {
+    int index1 = arr1_len - 1;
+    int index2 = arr2_len - 1;
 
-    // for (int j = 0; j < n; j++) {
+    if (arr1_len == 0) {
+        return arr2;
+    }
+    if (arr2_len == 0) {
+        return arr1;
+    }
+
+    // for (int j = 0; j < arr1_len; j++) {
     //     printf("%f, ", arr1[j]);
     // }
     // printf("---rank %d, arr1---\n", rank);
 
-    // for (int j = 0; j < n; j++) {
+    // for (int j = 0; j < arr2_len; j++) {
     //     printf("%f, ", arr2[j]);
     // }
     // printf("---rank %d, arr2---\n", rank);
-    for (int i = (n - 1); i >= 0; i--) {
+    for (int i = (arr1_len - 1); i >= 0; i--) {
         if (arr1[index1] == INFINITY || index1 < 0) {
             result[i] = arr2[index2];
             index2--;
@@ -86,11 +93,7 @@ float * sort_right_half (float * arr1, float * arr2, float * result, int n) {
         }
     }
 
-    if (n == 0) {
-        result[0] = INFINITY;
-    }
-
-    // for (int j = 0; j < n; j++) {
+    // for (int j = 0; j < arr1_len; j++) {
     //     printf("%f, ", result[j]);
     // }
     //     printf("---rank %d, sort right---\n", rank);
@@ -134,27 +137,43 @@ int main (int argc, char **argv)
     }
 
     local_end_index = local_start_index + num_local_elem;
-    // printf("Start index: %d, End index: %d, Num of element: %d\n", local_start_index, local_end_index, num_local_elem);
+
+    
+    // Calculate right and left data size
+    int right_elem_num = n / size;
+    int left_elem_num = n / size;
+    if ((rank + 1) < (n % size)) {
+        right_elem_num += 1;
+    }
+    if (rank == (size - 1)) {
+        right_elem_num = 0;
+    }
+
+    if ((rank - 1) < (n % size)) {
+        left_elem_num += 1;
+    }
+    if (rank == 0) {
+        left_elem_num = 0;
+    }
+    // printf("Rank: %d, Start index: %d, End index: %d, Num of element: %d\n", rank, local_start_index, local_end_index, num_local_elem);
+    // printf("Right element number: %d, Left element num: %d\n", right_elem_num, left_elem_num);
     // Allocate used buffers
-    int allocate_num = ((n / size) + 1);
-    float* data = (float *) malloc(allocate_num * sizeof(float));
-    float* temp1 = (float *) malloc(allocate_num * sizeof(float));
-    float* temp2 = (float *) malloc(allocate_num * sizeof(float));
+    float * data = (float *) malloc(num_local_elem * sizeof(float));
+    float * comm_right = (float *) malloc(right_elem_num * sizeof(float));
+    float * comm_left = (float *) malloc(left_elem_num * sizeof(float));
+    float * result = (float *) malloc(num_local_elem * sizeof(float));
     
     // Get this process data's by its rank
     MPI_File_open(MPI_COMM_WORLD, input_filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &input_file);
     MPI_File_read_at(input_file, sizeof(float) * local_start_index, data, num_local_elem, MPI_FLOAT, MPI_STATUS_IGNORE);
     MPI_File_close(&input_file);
-    if (additional_elem == 0 || num_local_elem == 0) {
-        data[allocate_num - 1] = INFINITY;
-    }
 
     // Sort local value by process
     if (num_local_elem >= 2) {
         qsort(data, num_local_elem, sizeof(float), compare);
     }
 
-    // for (int j = 0; j < allocate_num; j++) {
+    // for (int j = 0; j < num_local_elem; j++) {
     //     printf("%f, ", data[j]);
     // }
     // printf("---initial data %d, end---\n", rank);
@@ -163,52 +182,52 @@ int main (int argc, char **argv)
     MPI_Status status;
     float * tmp = data;
     MPI_Barrier(MPI_COMM_WORLD);
-    for (int i = 0; i < size; i++) {
+    for (int i = 1; i < size; i++) {
         // even phase
         if (size % 2 == 0 || size % 2 == 1 && rank != (size - 1)) {
             if (rank % 2 == 0) {
-                MPI_Sendrecv(data, allocate_num, MPI_FLOAT, rank + 1, 0,
-                            temp1, allocate_num, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &status);
-                data = sort_left_half(data, temp1, temp2, num_local_elem);
-                temp2 = tmp;
-                tmp = data;
+                MPI_Sendrecv(data, num_local_elem, MPI_FLOAT, rank + 1, 0,
+                            comm_right, right_elem_num, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &status);
+                tmp = sort_left_half(data, comm_right, result, num_local_elem, right_elem_num);
+                result = data;
+                data = tmp;
             } else if (rank % 2 == 1) {
-                MPI_Sendrecv(data, allocate_num, MPI_FLOAT, rank - 1, 0,
-                            temp1, allocate_num, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &status);
-                data = sort_right_half(data, temp1, temp2, num_local_elem);
-                temp2 = tmp; 
-                tmp = data;
+                MPI_Sendrecv(data, num_local_elem, MPI_FLOAT, rank - 1, 0,
+                            comm_left, left_elem_num, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &status);
+                tmp = sort_right_half(data, comm_left, result, num_local_elem, left_elem_num);
+                result = data;
+                data = tmp;
             }
         }
 
-        // for (int j = 0; j < allocate_num; j++) {
+        MPI_Barrier(MPI_COMM_WORLD);
+        // for (int j = 0; j < num_local_elem; j++) {
         //     printf("%f, ", data[j]);
         // }
         // printf("---rank %d, even phase end---\n", rank);
 
-        MPI_Barrier(MPI_COMM_WORLD);
         // odd phase
-        if ((size % 2 == 0 && rank != 0 && rank != (size - 1)) || (size % 2 == 1 && rank != 0)) {
+        if (size % 2 == 0 && rank != 0 && rank != (size - 1) || (size % 2 == 1 && rank != 0)) {
             if (rank % 2 == 0) {
-                MPI_Sendrecv(data, allocate_num, MPI_FLOAT, rank - 1, 0,
-                            temp1, allocate_num, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &status);
-                data = sort_right_half(data, temp1, temp2, num_local_elem);
-                temp2 = tmp;
-                tmp = data;
+                MPI_Sendrecv(data, num_local_elem, MPI_FLOAT, rank - 1, 0,
+                            comm_left, left_elem_num, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &status);
+                tmp = sort_right_half(data, comm_left, result, num_local_elem, left_elem_num);
+                result = data;
+                data = tmp;
             } else if (rank % 2 == 1) {
-                MPI_Sendrecv(data, allocate_num, MPI_FLOAT, rank + 1, 0,
-                temp1, allocate_num, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &status);
-                data = sort_left_half(data, temp1, temp2, num_local_elem);
-                temp2 = tmp;
-                tmp = data;
+                MPI_Sendrecv(data, num_local_elem, MPI_FLOAT, rank + 1, 0,
+                comm_right, right_elem_num, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &status);
+                tmp = sort_left_half(data, comm_right, result, num_local_elem, right_elem_num);
+                result = data;
+                data = tmp;
             }
         }
-
-        // for (int j = 0; j < allocate_num; j++) {
+        
+        MPI_Barrier(MPI_COMM_WORLD);
+        // for (int j = 0; j < num_local_elem; j++) {
         //     printf("%f, ", data[i]);
         // }
         // printf("---rank %d, odd phase end---\n", rank);
-        MPI_Barrier(MPI_COMM_WORLD);
     }
 
     // for (int i = 0; i < num_local_elem; i++) {
