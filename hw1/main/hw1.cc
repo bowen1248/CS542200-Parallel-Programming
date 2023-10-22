@@ -1,6 +1,5 @@
 #include <cstdio>
 #include <cstdlib>
-#include <math.h>
 #include <mpi.h>
 
 int rank, size;
