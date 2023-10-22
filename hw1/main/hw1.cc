@@ -170,20 +170,26 @@ int main (int argc, char **argv)
 
     // Even and odd phases
     MPI_Status status;
+    MPI_Request send_request = MPI_REQUEST_NULL;
+    MPI_Request recv_request = MPI_REQUEST_NULL;
     float * tmp = data;
     
     for (int i = 0; i <= (size / 2); i++) {
         // even phase
         if (size % 2 == 0 || size % 2 == 1 && rank != (size - 1)) {
             if (rank % 2 == 0) {
-                MPI_Sendrecv(data, num_local_elem, MPI_FLOAT, rank + 1, 0,
-                            comm_right, right_elem_num, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &status);
+                MPI_Isend(data, num_local_elem, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &send_request);
+                MPI_Irecv(comm_right, right_elem_num, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &recv_request);
+                //MPI_Wait(&send_request, &status);
+                MPI_Wait(&recv_request, &status);
                 tmp = sort_left_half(data, comm_right, result, num_local_elem, right_elem_num);
                 result = data;
                 data = tmp;
             } else if (rank % 2 == 1) {
-                MPI_Sendrecv(data, num_local_elem, MPI_FLOAT, rank - 1, 0,
-                            comm_left, left_elem_num, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &status);
+                MPI_Isend(data, num_local_elem, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &send_request);
+                MPI_Irecv(comm_left, left_elem_num, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &recv_request);
+                //MPI_Wait(&send_request, &status);
+                MPI_Wait(&recv_request, &status);
                 tmp = sort_right_half(data, comm_left, result, num_local_elem, left_elem_num);
                 result = data;
                 data = tmp;
@@ -199,14 +205,18 @@ int main (int argc, char **argv)
         // odd phase
         if (size % 2 == 0 && rank != 0 && rank != (size - 1) || (size % 2 == 1 && rank != 0)) {
             if (rank % 2 == 0) {
-                MPI_Sendrecv(data, num_local_elem, MPI_FLOAT, rank - 1, 0,
-                            comm_left, left_elem_num, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &status);
+                MPI_Isend(data, num_local_elem, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &send_request);
+                MPI_Irecv(comm_left, left_elem_num, MPI_FLOAT, rank - 1, 0, MPI_COMM_WORLD, &recv_request);
+                //MPI_Wait(&send_request, &status);
+                MPI_Wait(&recv_request, &status);
                 tmp = sort_right_half(data, comm_left, result, num_local_elem, left_elem_num);
                 result = data;
                 data = tmp;
             } else if (rank % 2 == 1) {
-                MPI_Sendrecv(data, num_local_elem, MPI_FLOAT, rank + 1, 0,
-                comm_right, right_elem_num, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &status);
+                MPI_Isend(data, num_local_elem, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &send_request);
+                MPI_Irecv(comm_right, right_elem_num, MPI_FLOAT, rank + 1, 0, MPI_COMM_WORLD, &recv_request);
+                //MPI_Wait(&send_request, &status);
+                MPI_Wait(&recv_request, &status);
                 tmp = sort_left_half(data, comm_right, result, num_local_elem, right_elem_num);
                 result = data;
                 data = tmp;

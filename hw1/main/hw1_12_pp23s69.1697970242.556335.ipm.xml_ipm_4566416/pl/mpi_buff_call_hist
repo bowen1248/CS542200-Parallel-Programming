@@ -1,0 +1,108 @@
+#proc getdata:
+data:
+MPI_Wait 167772160 154 55.31847 1.0427e-02 4.2375e+00 55.31847 154 100 100
+MPI_Isend 167772160 154 12.653137678 9.8776e-02 3.7426e+00 12.653137678 154 100 100
+MPI_Irecv 167772160 154 1.12703053 5.0068e-06 1.3664e-01 1.12703053 154 100 100
+ 
+ 
+#proc areadef
+rectangle: 1 1 6 4
+xautorange: 167772159 167772161
+yautorange: 12 154
+yaxis.stubs: inc
+xscaletype: log
+ yscaletype: log
+yaxis.label: # calls
+ 
+#proc xaxis
+  label: Buffer size (bytes)
+  selflocatingstubs: text
+        1          1
+        4          4
+        16         16
+        64         64
+        256        256
+        1024       1KB
+        4096       4KB
+        16384      16KB
+        65536      64KB
+        262144     256KB
+        1048576    1MB
+        4194304    4MB
+        16777216   16MB
+        67108864   64MB
+        268435456  128MB
+        1073741824 512MB
+  
+ 
+#proc lineplot
+xfield: 2
+yfield: 8
+sort: yes
+select: @@1 = MPI_Wait
+linedetails: color=red
+legendlabel: MPI_Wait
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=red
+ 
+ 
+#proc lineplot
+xfield: 2
+yfield: 8
+sort: yes
+select: @@1 = MPI_Isend
+linedetails: color=green
+legendlabel: MPI_Isend
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=green
+ 
+ 
+#proc lineplot
+xfield: 2
+yfield: 8
+sort: yes
+select: @@1 = MPI_Irecv
+linedetails: color=blue
+legendlabel: MPI_Irecv
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=blue
+ 
+ 
+#proc lineplot
+xfield: 2
+yfield: 8
+sort: yes
+select: @@1 = MPI_Comm_rank
+linedetails: color=yellow
+legendlabel: MPI_Comm_rank
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=yellow
+ 
+ 
+#proc lineplot
+xfield: 2
+yfield: 8
+sort: yes
+select: @@1 = MPI_Comm_size
+linedetails: color=purple
+legendlabel: MPI_Comm_size
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=purple
+ 
+ 
+#proc lineplot
+xfield: 2
+yfield: 8
+sort: yes
+select: @@1 = MPI_Init
+linedetails: color=orange
+legendlabel: MPI_Init
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=orange
+ 
+ 
+#proc lineplot
+xfield: 2
+yfield: 8
+sort: yes
+select: @@1 = MPI_Finalize
+linedetails: color=coral
+legendlabel: MPI_Finalize
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=coral
+ 
+#proc legend
+location: max-0.5 max-0.5
