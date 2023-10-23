@@ -1,6 +1,5 @@
 #include <cstdio>
 #include <cstdlib>
-#include <boost/sort/spreadsort/spreadsort.hpp>
 #include <mpi.h>
 
 int rank, size;
@@ -95,8 +94,9 @@ float * sort_right_half (float * arr1, float * arr2, float * result, int arr1_le
 
 int main (int argc, char **argv)
 {
+    
     MPI_Init(&argc, &argv);
-
+    double t1 = MPI_Wtime();
     // Get current process rank
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -154,17 +154,19 @@ int main (int argc, char **argv)
     float * comm_left = (float *) malloc(left_elem_num * sizeof(float));
     float * result = (float *) malloc(num_local_elem * sizeof(float));
     
-    // Get this process data's by its rank
-    MPI_File_open(MPI_COMM_WORLD, input_filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &input_file);
-    MPI_File_read_at(input_file, sizeof(float) * local_start_index, data, num_local_elem, MPI_FLOAT, MPI_STATUS_IGNORE);
-    // MPI_File_close(&input_file);
+    printf( "Preprocess time from process %d of %d, time = %f\n", rank, size, MPI_Wtime() - t1);
 
+    // Get this process data's by its rank
+    MPI_Request req;
+    MPI_File_open(MPI_COMM_WORLD, input_filename, MPI_MODE_RDONLY, MPI_INFO_NULL, &input_file);
+    MPI_File_iread_at(input_file, sizeof(float) * local_start_index, data, num_local_elem, MPI_FLOAT, &req);
+
+    printf( "Read file time from process %d of %d, time = %f\n", rank, size, MPI_Wtime() - t1);
     // Sort local value by process
     if (num_local_elem >= 2) {
-        boost::sort::spreadsort::spreadsort(data, data + num_local_elem);
-        // qsort(data, num_local_elem, sizeof(float), compare);
+        qsort(data, num_local_elem, sizeof(float), compare);
     }
-
+    printf( "Sorting time from process %d of %d, time = %f\n", rank, size, MPI_Wtime() - t1);
     // for (int j = 0; j < num_local_elem; j++) {
     //     printf("%f, ", data[j]);
     // }
@@ -172,6 +174,8 @@ int main (int argc, char **argv)
 
     // Even and odd phases
     MPI_Status status;
+    MPI_Request send_request = MPI_REQUEST_NULL;
+    MPI_Request recv_request = MPI_REQUEST_NULL;
     float * tmp = data;
     
     for (int i = 0; i <= (size / 2); i++) {
@@ -214,14 +218,15 @@ int main (int argc, char **argv)
                 data = tmp;
             }
         }
-        
+        if (rank == 1)
+            printf( "Odd even phase round %d from process %d of %d, time = %f\n", i, rank, size, MPI_Wtime() - t1);
         // MPI_Barrier(MPI_COMM_WORLD);
         // for (int j = 0; j < num_local_elem; j++) {
         //     printf("%f, ", data[i]);
         // }
         // printf("---rank %d, odd phase end---\n", rank);
     }
-
+    printf( "Odd-even phase time from process %d of %d, time = %f\n", rank, size, MPI_Wtime() - t1);
     // for (int i = 0; i < num_local_elem; i++) {
     //     printf("rank %d got float: %f\n", rank, data[i]);
     // }
@@ -248,10 +253,9 @@ int main (int argc, char **argv)
     // printf("\n");
 
     MPI_File_open(MPI_COMM_WORLD, output_filename, MPI_MODE_CREATE|MPI_MODE_WRONLY, MPI_INFO_NULL, &output_file);
-    MPI_File_write_at(output_file, sizeof(float) * local_start_index, data, num_local_elem, MPI_FLOAT, MPI_STATUS_IGNORE);
+    MPI_File_iwrite_at(output_file, sizeof(float) * local_start_index, data, num_local_elem, MPI_FLOAT, &req);
     // MPI_File_close(&output_file);
-
+    printf( "Close file time from process %d of %d, time = %f\n", rank, size, MPI_Wtime() - t1);
     MPI_Finalize();
     return 0;
 }
-
