@@ -1,9 +1,9 @@
 CC = mpicc
 CXX = mpicxx
-CXXFLAGS = -O3
-CFLAGS = -O3
-# CXXFLAGS = -O3 -lm -L /opt/ipm/lib -lipm
-# CFLAGS = -O3 -lm -L /opt/ipm/lib -lipm
+
+CXXFLAGS = -O3 -march=native -mtune=native
+CFLAGS = -O3 -march=native -mtune=native
+
 TARGETS = hw1
 
 .PHONY: all
