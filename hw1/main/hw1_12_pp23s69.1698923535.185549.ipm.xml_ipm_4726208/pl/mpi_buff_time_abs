@@ -1,0 +1,91 @@
+#proc getdata:
+data:
+MPI_Sendrecv 167772160 154 46.12006 5.0179e-01 1.4749e+00 46.12006 154 100 100
+ 
+ 
+#proc areadef
+rectangle: 1 1 6 4
+xautorange: 167772159 167772161
+yautorange: 0 46.12006
+yaxis.stubs: inc
+xscaletype: log
+// yscaletype: log
+yaxis.label: comm time <= buffer size
+ 
+#proc xaxis
+  label: Buffer size (bytes)
+  selflocatingstubs: text
+        1          1
+        4          4
+        16         16
+        64         64
+        256        256
+        1024       1KB
+        4096       4KB
+        16384      16KB
+        65536      64KB
+        262144     256KB
+        1048576    1MB
+        4194304    4MB
+        16777216   16MB
+        67108864   64MB
+        268435456  128MB
+        1073741824 512MB
+  
+ 
+#proc lineplot
+xfield: 2
+yfield: 7
+sort: yes
+accum: yes
+select: @@1 = MPI_Sendrecv
+linedetails: color=red
+legendlabel: MPI_Sendrecv
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=red
+ 
+ 
+#proc lineplot
+xfield: 2
+yfield: 7
+sort: yes
+accum: yes
+select: @@1 = MPI_Comm_rank
+linedetails: color=green
+legendlabel: MPI_Comm_rank
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=green
+ 
+ 
+#proc lineplot
+xfield: 2
+yfield: 7
+sort: yes
+accum: yes
+select: @@1 = MPI_Comm_size
+linedetails: color=blue
+legendlabel: MPI_Comm_size
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=blue
+ 
+ 
+#proc lineplot
+xfield: 2
+yfield: 7
+sort: yes
+accum: yes
+select: @@1 = MPI_Init
+linedetails: color=yellow
+legendlabel: MPI_Init
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=yellow
+ 
+ 
+#proc lineplot
+xfield: 2
+yfield: 7
+sort: yes
+accum: yes
+select: @@1 = MPI_Finalize
+linedetails: color=purple
+legendlabel: MPI_Finalize
+pointsymbol: shape=circle linecolor=black radius=0.03 fillcolor=purple
+ 
+#proc legend
+location: max-0.5 max-0.5

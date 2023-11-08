@@ -1,0 +1,175 @@
+#proc areadef
+  rectangle: 1 1 6 6
+  frame: width=0.5 color=0.3
+  xrange: -1 12
+  yrange: -1 12
+  xaxis.stubs: inc
+  yaxis.stubs: inc
+  xaxis.stubrange: 0 
+  yaxis.stubrange: 0 
+  xaxis.stubvert: yes
+  xaxis.label: MPI_Rank
+  yaxis.label: MPI_Rank
+ 
+#proc rect
+ rectangle: -0.500000(s) -0.500000(s) 0.500000(s) 0.500000(s)
+ color: gray(0.47)
+
+#proc rect
+ rectangle: -0.500000(s) 0.500000(s) 0.500000(s) 1.500000(s)
+ color: gray(0.30)
+
+#proc rect
+ rectangle: 0.500000(s) -0.500000(s) 1.500000(s) 0.500000(s)
+ color: gray(0.92)
+
+#proc rect
+ rectangle: 0.500000(s) 1.500000(s) 1.500000(s) 2.500000(s)
+ color: gray(0.18)
+
+#proc rect
+ rectangle: 9.500000(s) -0.500000(s) 10.500000(s) 0.500000(s)
+ color: gray(0.06)
+
+#proc rect
+ rectangle: 9.500000(s) 10.500000(s) 10.500000(s) 11.500000(s)
+ color: gray(0.08)
+
+#proc rect
+ rectangle: 9.500000(s) 8.500000(s) 10.500000(s) 9.500000(s)
+ color: gray(0.19)
+
+#proc rect
+ rectangle: 10.500000(s) -0.500000(s) 11.500000(s) 0.500000(s)
+ color: gray(0.06)
+
+#proc rect
+ rectangle: 10.500000(s) 9.500000(s) 11.500000(s) 10.500000(s)
+ color: gray(0.38)
+
+#proc rect
+ rectangle: 1.500000(s) -0.500000(s) 2.500000(s) 0.500000(s)
+ color: gray(1.00)
+
+#proc rect
+ rectangle: 1.500000(s) 0.500000(s) 2.500000(s) 1.500000(s)
+ color: gray(0.11)
+
+#proc rect
+ rectangle: 1.500000(s) 2.500000(s) 2.500000(s) 3.500000(s)
+ color: gray(0.17)
+
+#proc rect
+ rectangle: 2.500000(s) -0.500000(s) 3.500000(s) 0.500000(s)
+ color: gray(0.85)
+
+#proc rect
+ rectangle: 2.500000(s) 1.500000(s) 3.500000(s) 2.500000(s)
+ color: gray(0.09)
+
+#proc rect
+ rectangle: 2.500000(s) 3.500000(s) 3.500000(s) 4.500000(s)
+ color: gray(0.20)
+
+#proc rect
+ rectangle: 3.500000(s) -0.500000(s) 4.500000(s) 0.500000(s)
+ color: gray(0.45)
+
+#proc rect
+ rectangle: 3.500000(s) 2.500000(s) 4.500000(s) 3.500000(s)
+ color: gray(0.08)
+
+#proc rect
+ rectangle: 3.500000(s) 4.500000(s) 4.500000(s) 5.500000(s)
+ color: gray(0.11)
+
+#proc rect
+ rectangle: 4.500000(s) -0.500000(s) 5.500000(s) 0.500000(s)
+ color: gray(0.84)
+
+#proc rect
+ rectangle: 4.500000(s) 3.500000(s) 5.500000(s) 4.500000(s)
+ color: gray(0.16)
+
+#proc rect
+ rectangle: 4.500000(s) 5.500000(s) 5.500000(s) 6.500000(s)
+ color: gray(0.14)
+
+#proc rect
+ rectangle: 5.500000(s) -0.500000(s) 6.500000(s) 0.500000(s)
+ color: gray(0.15)
+
+#proc rect
+ rectangle: 5.500000(s) 4.500000(s) 6.500000(s) 5.500000(s)
+ color: gray(0.12)
+
+#proc rect
+ rectangle: 5.500000(s) 6.500000(s) 6.500000(s) 7.500000(s)
+ color: gray(0.15)
+
+#proc rect
+ rectangle: 6.500000(s) -0.500000(s) 7.500000(s) 0.500000(s)
+ color: gray(0.83)
+
+#proc rect
+ rectangle: 6.500000(s) 5.500000(s) 7.500000(s) 6.500000(s)
+ color: gray(0.08)
+
+#proc rect
+ rectangle: 6.500000(s) 7.500000(s) 7.500000(s) 8.500000(s)
+ color: gray(0.18)
+
+#proc rect
+ rectangle: 7.500000(s) -0.500000(s) 8.500000(s) 0.500000(s)
+ color: gray(0.44)
+
+#proc rect
+ rectangle: 7.500000(s) 6.500000(s) 8.500000(s) 7.500000(s)
+ color: gray(0.14)
+
+#proc rect
+ rectangle: 7.500000(s) 8.500000(s) 8.500000(s) 9.500000(s)
+ color: gray(0.15)
+
+#proc rect
+ rectangle: 8.500000(s) -0.500000(s) 9.500000(s) 0.500000(s)
+ color: gray(0.14)
+
+#proc rect
+ rectangle: 8.500000(s) 9.500000(s) 9.500000(s) 10.500000(s)
+ color: gray(0.24)
+
+#proc rect
+ rectangle: 8.500000(s) 7.500000(s) 9.500000(s) 8.500000(s)
+ color: gray(0.08)
+
+
+
+#proc legendentry:
+sampletype: symbol
+details: style=outline fillcolor=gray(0.00) shape=square linecolor=black
+ label: 1.250e-05 sec
+#proc legendentry:
+sampletype: symbol
+details: style=outline fillcolor=gray(0.20) shape=square linecolor=black
+ label: 9.998e-06 sec
+#proc legendentry:
+sampletype: symbol
+details: style=outline fillcolor=gray(0.40) shape=square linecolor=black
+ label: 7.499e-06 sec
+#proc legendentry:
+sampletype: symbol
+details: style=outline fillcolor=gray(0.60) shape=square linecolor=black
+ label: 4.999e-06 sec
+#proc legendentry:
+sampletype: symbol
+details: style=outline fillcolor=gray(0.80) shape=square linecolor=black
+ label: 2.500e-06 sec
+#proc legendentry:
+sampletype: symbol
+details: style=outline fillcolor=gray(1.00) shape=square linecolor=black
+ label: 0.000e+00 sec
+ 
+#proc legend
+location: max+0.5 max-0.5
+ 
