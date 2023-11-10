@@ -6,7 +6,7 @@ hw2a: CFLAGS += -pthread
 hw2b: CC = mpicc
 hw2b: CXX = mpicxx
 hw2b: CFLAGS += -fopenmp
-CXXFLAGS = $(CFLAGS)
+CXXFLAGS = $(CFLAGS) -std=c++17
 TARGETS = hw2a
 
 .PHONY: all

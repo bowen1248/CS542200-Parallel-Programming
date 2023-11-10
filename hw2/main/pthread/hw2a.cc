@@ -2,39 +2,119 @@
 #define _GNU_SOURCE
 #endif
 #define PNG_NO_SETJMP
+
 #include <sched.h>
 #include <assert.h>
 #include <png.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+#include <atomic>
+#include <xmmintrin.h>
 
+#define TASK_HEIGHT 1
+#define TASK_WIDTH 1
 
+int *image;
+int iters;
+double left;
+double right;
+double lower;
+double upper;
+int height;
+int width;
 
-void slave (int i, int j, float iters, float left, float right, float lower, float upper, float height, float width) {
-    for (int j = 0; j < height; ++j) {
-        float y0 = j * ((upper - lower) / height) + lower;
-        for (int i = 0; i < width; ++i) {
-            float x0 = i * ((right - left) / width) + left;
+int taskCount;
+std::atomic_int curTask;
 
-            int repeats = 0;
-            float x = 0;
-            float y = 0;
-            float length_squared = 0;
-            while (repeats < iters && length_squared < 4) {
-                float temp = x * x - y * y + x0;
+double xDelta;
+double yDelta;
+
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void *slaveSIMD(void *args)
+{
+    int fetchedTask;
+    int repeats = 0;
+    double x, x0, y, y0;
+    double length_squared;
+    double temp;
+
+    // Fetch task
+    fetchedTask = curTask.fetch_add(1);
+
+    while (fetchedTask < height)
+    {
+        y0 = fetchedTask * yDelta + lower;
+        x0 = left;
+        for (int i = 0; i < width; ++i)
+        {
+            repeats = 0;
+            x = 0;
+            y = 0;
+            length_squared = 0;
+
+            while (repeats < iters && length_squared < 4)
+            {
+                temp = x * x - y * y + x0;
                 y = 2 * x * y + y0;
                 x = temp;
                 length_squared = x * x + y * y;
                 ++repeats;
             }
-            image[j * width + i] = repeats;
+            image[fetchedTask * width + i] = repeats;
+            x0 += xDelta;
         }
+        fetchedTask = curTask.fetch_add(1);
     }
+
+    return NULL;
 }
 
-void write_png(const char* filename, int iters, int width, int height, const int* buffer) {
-    FILE* fp = fopen(filename, "wb");
+void *slaveSISD(void *args)
+{
+    int fetchedTask;
+    int repeats = 0;
+    double x, x0, y, y0;
+    double length_squared;
+    double temp;
+
+    // Fetch task
+    fetchedTask = curTask.fetch_add(1);
+
+    while (fetchedTask < height)
+    {
+        y0 = fetchedTask * yDelta + lower;
+
+        for (int i = 0; i < width; ++i)
+        {
+            repeats = 0;
+            x = 0;
+            x0 = xDelta * i + left;;
+            y = 0;
+            length_squared = 0;
+
+            while (repeats < iters && length_squared < 4)
+            {
+                temp = x * x - y * y + x0;
+                y = 2 * x * y + y0;
+                x = temp;
+                length_squared = x * x + y * y;
+                ++repeats;
+            }
+            image[fetchedTask * width + i] = repeats;
+            
+        }
+        fetchedTask = curTask.fetch_add(1);
+    }
+
+    return NULL;
+}
+
+void write_png(const char *filename, int iters, int width, int height, const int *buffer)
+{
+    FILE *fp = fopen(filename, "wb");
     assert(fp);
     png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
     assert(png_ptr);
@@ -48,16 +128,22 @@ void write_png(const char* filename, int iters, int width, int height, const int
     png_set_compression_level(png_ptr, 1);
     size_t row_size = 3 * width * sizeof(png_byte);
     png_bytep row = (png_bytep)malloc(row_size);
-    for (int y = 0; y < height; ++y) {
+    for (int y = 0; y < height; ++y)
+    {
         memset(row, 0, row_size);
-        for (int x = 0; x < width; ++x) {
+        for (int x = 0; x < width; ++x)
+        {
             int p = buffer[(height - 1 - y) * width + x];
             png_bytep color = row + x * 3;
-            if (p != iters) {
-                if (p & 16) {
+            if (p != iters)
+            {
+                if (p & 16)
+                {
                     color[0] = 240;
                     color[1] = color[2] = p % 16 * 16;
-                } else {
+                }
+                else
+                {
                     color[0] = p % 16 * 16;
                 }
             }
@@ -70,29 +156,46 @@ void write_png(const char* filename, int iters, int width, int height, const int
     fclose(fp);
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv)
+{
     /* detect how many CPUs are available */
     cpu_set_t cpu_set;
+    int ncpus;
     sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
-    printf("%d cpus available\n", CPU_COUNT(&cpu_set));
+    ncpus = CPU_COUNT(&cpu_set);
+
+    // Thread handlers
+    pthread_t threads[ncpus];
 
     /* argument parsing */
     assert(argc == 9);
-    const char* filename = argv[1];
-    int iters = strtol(argv[2], 0, 10);
-    double left = strtod(argv[3], 0);
-    double right = strtod(argv[4], 0);
-    double lower = strtod(argv[5], 0);
-    double upper = strtod(argv[6], 0);
-    int width = strtol(argv[7], 0, 10);
-    int height = strtol(argv[8], 0, 10);
+    const char *filename = argv[1];
+    iters = strtol(argv[2], 0, 10);
+    left = strtod(argv[3], 0);
+    right = strtod(argv[4], 0);
+    lower = strtod(argv[5], 0);
+    upper = strtod(argv[6], 0);
+    width = strtol(argv[7], 0, 10);
+    height = strtol(argv[8], 0, 10);
 
     /* allocate memory for image */
-    int* image = (int*)malloc(width * height * sizeof(int));
+    image = (int *)malloc(width * height * sizeof(int));
     assert(image);
 
-    /* mandelbrot set */
+    // Calculate delta
+    xDelta = (right - left) / width;
+    yDelta = (upper - lower) / height;
 
+    /* mandelbrot set */
+    for (int i = 0; i < ncpus; i++)
+    {
+        pthread_create(&threads[i], NULL, slaveSISD, NULL);
+    }
+
+    for (int i = 0; i < ncpus; i++)
+    {
+        pthread_join(threads[i], NULL);
+    }
 
     /* draw and cleanup */
     write_png(filename, iters, width, height, image);
