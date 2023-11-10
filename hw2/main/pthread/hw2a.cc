@@ -11,12 +11,13 @@
 #include <string.h>
 #include <pthread.h>
 #include <atomic>
-#include <xmmintrin.h>
+#include <emmintrin.h>
 
 #define TASK_HEIGHT 1
 #define TASK_WIDTH 1
 
 int *image;
+int *image2;
 int iters;
 double left;
 double right;
@@ -36,36 +37,97 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 void *slaveSIMD(void *args)
 {
     int fetchedTask;
-    int repeats = 0;
-    double x, x0, y, y0;
-    double length_squared;
-    double temp;
+    long long int i;
+    long long int repeats[2], curPixel[2];
+    __m128d x, y, x0, y0, temp, length_squared;
+    __m128d two_m128 = _mm_set1_pd(2);
 
     // Fetch task
     fetchedTask = curTask.fetch_add(1);
 
     while (fetchedTask < height)
     {
-        y0 = fetchedTask * yDelta + lower;
-        x0 = left;
-        for (int i = 0; i < width; ++i)
-        {
-            repeats = 0;
-            x = 0;
-            y = 0;
-            length_squared = 0;
+        y0 = _mm_set1_pd(fetchedTask * yDelta + lower);
+        x0[0] = left;
+        x0[1] = xDelta + left;
+        curPixel[0] = 0;
+        curPixel[1] = 1;
+        i = 2;
 
-            while (repeats < iters && length_squared < 4)
-            {
-                temp = x * x - y * y + x0;
-                y = 2 * x * y + y0;
-                x = temp;
-                length_squared = x * x + y * y;
-                ++repeats;
+        // init
+        x = y = length_squared = _mm_setzero_pd();
+        repeats[0] = repeats[1] = 0;
+
+        while (true)
+        {
+            if (repeats[0] >= iters || length_squared[0] >= 4) {
+                image[fetchedTask * width + curPixel[0]] = repeats[0];
+                if (i >= width)
+                    break;
+                curPixel[0] = i;
+                x0[0] = xDelta * i + left;
+                x[0] = 0;
+                y[0] = 0;
+                repeats[0] = 0;
+                i++;
             }
-            image[fetchedTask * width + i] = repeats;
-            x0 += xDelta;
+            
+            if (repeats[1] >= iters || length_squared[1] >= 4) {
+                image[fetchedTask * width + curPixel[1]] = repeats[1];
+                if (i >= width)
+                    break;
+                curPixel[1] = i;
+                x0[1] = xDelta * i + left;
+                x[1] = 0;
+                y[1] = 0;
+                repeats[1] = 0;
+                i++;
+            }
+
+            temp = _mm_add_pd(_mm_sub_pd(_mm_mul_pd(x, x), _mm_mul_pd(y, y)), x0);
+            y = _mm_add_pd(_mm_mul_pd(_mm_mul_pd(x, y), two_m128), y0);
+            x = temp;
+            length_squared = _mm_add_pd(_mm_mul_pd(x, x),_mm_mul_pd(y, y));
+
+            repeats[0]++;
+            repeats[1]++;
         }
+
+        if (curPixel[0] < width) {
+            x0[0] = xDelta * curPixel[0] + left;
+            x[0] = 0;
+            y[0] = 0;
+            repeats[0] = 0;
+            length_squared[0] = 0;
+            while (repeats[0] < iters && length_squared[0] < 4)
+            {
+                temp[0] = x[0] * x[0] - y[0] * y[0] + x0[0];
+                y[0] = 2 * x[0] * y[0] + y0[0];
+                x[0] = temp[0];
+                length_squared[0] = x[0] * x[0] + y[0] * y[0];
+                ++repeats[0];
+            }
+            image[fetchedTask * width + curPixel[0]] = repeats[0];
+        }
+
+        if (curPixel[1] < width) {
+            x0[1] = xDelta * curPixel[1] + left;
+            x[1] = 0;
+            y[1] = 0;
+            repeats[1] = 0;
+            length_squared[1] = 0;
+            while (repeats[1] < iters && length_squared[1] < 4)
+            {
+                temp[1] = x[1] * x[1] - y[1] * y[1] + x0[1];
+                y[1] = 2 * x[1] * y[1] + y0[1];
+                x[1] = temp[1];
+                length_squared[1] = x[1] * x[1] + y[1] * y[1];
+                ++repeats[1];
+            }
+            image[fetchedTask * width + curPixel[1]] = repeats[1];
+        }
+
+        // Fetch new task
         fetchedTask = curTask.fetch_add(1);
     }
 
@@ -91,7 +153,7 @@ void *slaveSISD(void *args)
         {
             repeats = 0;
             x = 0;
-            x0 = xDelta * i + left;;
+            x0 = xDelta * i + left;
             y = 0;
             length_squared = 0;
 
@@ -103,7 +165,7 @@ void *slaveSISD(void *args)
                 length_squared = x * x + y * y;
                 ++repeats;
             }
-            image[fetchedTask * width + i] = repeats;
+            image2[fetchedTask * width + i] = repeats;
             
         }
         fetchedTask = curTask.fetch_add(1);
@@ -181,6 +243,8 @@ int main(int argc, char **argv)
     /* allocate memory for image */
     image = (int *)malloc(width * height * sizeof(int));
     assert(image);
+    image2 = (int *)malloc(width * height * sizeof(int));
+    assert(image2);
 
     // Calculate delta
     xDelta = (right - left) / width;
@@ -189,7 +253,7 @@ int main(int argc, char **argv)
     /* mandelbrot set */
     for (int i = 0; i < ncpus; i++)
     {
-        pthread_create(&threads[i], NULL, slaveSISD, NULL);
+        pthread_create(&threads[i], NULL, slaveSIMD, NULL);
     }
 
     for (int i = 0; i < ncpus; i++)
