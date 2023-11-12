@@ -26,8 +26,6 @@ std::atomic_int curTask;
 
 double xDelta, yDelta;
 
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-
 void *slaveSIMD(void *args)
 {
     int fetchedTask;

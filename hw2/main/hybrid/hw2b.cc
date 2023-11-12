@@ -6,17 +6,15 @@
 #include <sched.h>
 #include <assert.h>
 #include <png.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <atomic>
 #include <emmintrin.h>
+#include <math.h>
+#include <mpi.h>
 
-#define TASK_HEIGHT 1
-#define TASK_WIDTH 1
-
-int *image;
+int *tmpImage, *fullImage, *finalImage;
 int iters;
 double left, right, lower, upper;
 int height, width;
@@ -25,151 +23,9 @@ int taskCount;
 std::atomic_int curTask;
 
 double xDelta, yDelta;
+int yRange;
 
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-
-void *slaveSIMD(void *args)
-{
-    int fetchedTask;
-    long long int i;
-    long long int repeats[2], curPixel[2];
-    __m128d x, y, x0, y0, temp, length_squared;
-    __m128d two_m128 = _mm_set1_pd(2);
-
-    // Fetch task
-    fetchedTask = curTask.fetch_add(1);
-
-    while (fetchedTask < height)
-    {
-        y0 = _mm_set1_pd(fetchedTask * yDelta + lower);
-        x0[0] = left;
-        x0[1] = xDelta + left;
-        curPixel[0] = 0;
-        curPixel[1] = 1;
-        i = 2;
-
-        // init
-        x = y = length_squared = _mm_setzero_pd();
-        repeats[0] = repeats[1] = 0;
-
-        while (true)
-        {
-            if (length_squared[0] >= 4 || repeats[0] >= iters)
-            {
-                image[fetchedTask * width + curPixel[0]] = repeats[0];
-                if (i >= width)
-                    break;
-                curPixel[0] = i;
-                x0[0] = xDelta * i + left;
-                x[0] = 0;
-                y[0] = 0;
-                repeats[0] = 0;
-                i++;
-            }
-
-            if (length_squared[1] >= 4 || repeats[1] >= iters)
-            {
-                image[fetchedTask * width + curPixel[1]] = repeats[1];
-                if (i >= width)
-                    break;
-                curPixel[1] = i;
-                x0[1] = xDelta * i + left;
-                x[1] = 0;
-                y[1] = 0;
-                repeats[1] = 0;
-                i++;
-            }
-
-            temp = _mm_add_pd(_mm_sub_pd(_mm_mul_pd(x, x), _mm_mul_pd(y, y)), x0);
-            y = _mm_add_pd(_mm_mul_pd(_mm_mul_pd(x, y), two_m128), y0);
-            x = temp;
-            length_squared = _mm_add_pd(_mm_mul_pd(x, x), _mm_mul_pd(y, y));
-
-            repeats[0]++;
-            repeats[1]++;
-        }
-
-        if (curPixel[0] < width)
-        {
-            x0[0] = xDelta * curPixel[0] + left;
-            x[0] = 0;
-            y[0] = 0;
-            repeats[0] = 0;
-            length_squared[0] = 0;
-            while (repeats[0] < iters && length_squared[0] < 4)
-            {
-                temp[0] = x[0] * x[0] - y[0] * y[0] + x0[0];
-                y[0] = 2 * x[0] * y[0] + y0[0];
-                x[0] = temp[0];
-                length_squared[0] = x[0] * x[0] + y[0] * y[0];
-                ++repeats[0];
-            }
-            image[fetchedTask * width + curPixel[0]] = repeats[0];
-        }
-
-        if (curPixel[1] < width)
-        {
-            x0[1] = xDelta * curPixel[1] + left;
-            x[1] = 0;
-            y[1] = 0;
-            repeats[1] = 0;
-            length_squared[1] = 0;
-            while (repeats[1] < iters && length_squared[1] < 4)
-            {
-                temp[1] = x[1] * x[1] - y[1] * y[1] + x0[1];
-                y[1] = 2 * x[1] * y[1] + y0[1];
-                x[1] = temp[1];
-                length_squared[1] = x[1] * x[1] + y[1] * y[1];
-                ++repeats[1];
-            }
-            image[fetchedTask * width + curPixel[1]] = repeats[1];
-        }
-
-        // Fetch new task
-        fetchedTask = curTask.fetch_add(1);
-    }
-
-    return NULL;
-}
-
-void *slaveSISD(void *args)
-{
-    int fetchedTask;
-    int repeats = 0;
-    double x, x0, y, y0;
-    double length_squared;
-    double temp;
-
-    // Fetch task
-    fetchedTask = curTask.fetch_add(1);
-
-    while (fetchedTask < height)
-    {
-        y0 = fetchedTask * yDelta + lower;
-
-        for (int i = 0; i < width; ++i)
-        {
-            repeats = 0;
-            x = 0;
-            x0 = xDelta * i + left;
-            y = 0;
-            length_squared = 0;
-
-            while (repeats < iters && length_squared < 4)
-            {
-                temp = x * x - y * y + x0;
-                y = 2 * x * y + y0;
-                x = temp;
-                length_squared = x * x + y * y;
-                ++repeats;
-            }
-            image[fetchedTask * width + i] = repeats;
-        }
-        fetchedTask = curTask.fetch_add(1);
-    }
-
-    return NULL;
-}
+int rank, size;
 
 void write_png(const char *filename, int iters, int width, int height, const int *buffer)
 {
@@ -217,6 +73,12 @@ void write_png(const char *filename, int iters, int width, int height, const int
 
 int main(int argc, char **argv)
 {
+    MPI_Init(&argc, &argv);
+
+    // Get current process rank
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
     /* detect how many CPUs are available */
     cpu_set_t cpu_set;
     int ncpus;
@@ -237,25 +99,143 @@ int main(int argc, char **argv)
     width = strtol(argv[7], 0, 10);
     height = strtol(argv[8], 0, 10);
 
-    /* allocate memory for image */
-    image = (int *)malloc(width * height * sizeof(int));
-
     // Calculate delta
     xDelta = (right - left) / width;
     yDelta = (upper - lower) / height;
 
-    /* mandelbrot set */
-    for (int i = 0; i < ncpus; i++)
-    {
-        pthread_create(&threads[i], NULL, slaveSIMD, NULL);
+    // Calculate y range
+    yRange = ceil((double) height / size);
+
+    /* allocate memory for image */
+    tmpImage = (int *)malloc(width * yRange * sizeof(int));
+    if (rank == 0) {
+        fullImage = (int *)malloc(width * yRange * size * sizeof(int));
+        finalImage = (int *)malloc(width * height * sizeof(int));
     }
 
-    for (int i = 0; i < ncpus; i++)
+/* mandelbrot set */
+#pragma omp parallel num_threads(ncpus)
     {
-        pthread_join(threads[i], NULL);
+        int fetchedTask;
+        long long int i;
+        long long int repeats[2], curPixel[2];
+        __m128d x, y, x0, y0, temp, length_squared;
+        __m128d two_m128 = _mm_set1_pd(2);
+
+        // Fetch task
+        fetchedTask = curTask.fetch_add(1);
+        
+        while (fetchedTask < yRange)
+        {
+            y0 = _mm_set1_pd((fetchedTask * size + rank) * yDelta + lower);
+            // y0 = _mm_set1_pd((yRange * rank + fetchedTask) * yDelta + lower);
+            x0[0] = left;
+            x0[1] = xDelta + left;
+            curPixel[0] = 0;
+            curPixel[1] = 1;
+            i = 2;
+
+            // init
+            x = y = length_squared = _mm_setzero_pd();
+            repeats[0] = repeats[1] = 0;
+
+            while (true)
+            {
+                if (length_squared[0] >= 4 || repeats[0] >= iters)
+                {
+                    tmpImage[fetchedTask * width + curPixel[0]] = repeats[0];
+                    if (i >= width)
+                        break;
+                    curPixel[0] = i;
+                    x0[0] = xDelta * i + left;
+                    x[0] = 0;
+                    y[0] = 0;
+                    repeats[0] = 0;
+                    i++;
+                }
+
+                if (length_squared[1] >= 4 || repeats[1] >= iters)
+                {
+                    tmpImage[fetchedTask * width + curPixel[1]] = repeats[1];
+                    if (i >= width)
+                        break;
+                    curPixel[1] = i;
+                    x0[1] = xDelta * i + left;
+                    x[1] = 0;
+                    y[1] = 0;
+                    repeats[1] = 0;
+                    i++;
+                }
+
+                temp = _mm_add_pd(_mm_sub_pd(_mm_mul_pd(x, x), _mm_mul_pd(y, y)), x0);
+                y = _mm_add_pd(_mm_mul_pd(_mm_mul_pd(x, y), two_m128), y0);
+                x = temp;
+                length_squared = _mm_add_pd(_mm_mul_pd(x, x), _mm_mul_pd(y, y));
+
+                repeats[0]++;
+                repeats[1]++;
+            }
+
+            if (curPixel[0] < width)
+            {
+                x0[0] = xDelta * curPixel[0] + left;
+                x[0] = 0;
+                y[0] = 0;
+                repeats[0] = 0;
+                length_squared[0] = 0;
+                while (repeats[0] < iters && length_squared[0] < 4)
+                {
+                    temp[0] = x[0] * x[0] - y[0] * y[0] + x0[0];
+                    y[0] = 2 * x[0] * y[0] + y0[0];
+                    x[0] = temp[0];
+                    length_squared[0] = x[0] * x[0] + y[0] * y[0];
+                    ++repeats[0];
+                }
+                tmpImage[fetchedTask * width + curPixel[0]] = repeats[0];
+            }
+
+            if (curPixel[1] < width)
+            {
+                x0[1] = xDelta * curPixel[1] + left;
+                x[1] = 0;
+                y[1] = 0;
+                repeats[1] = 0;
+                length_squared[1] = 0;
+                while (repeats[1] < iters && length_squared[1] < 4)
+                {
+                    temp[1] = x[1] * x[1] - y[1] * y[1] + x0[1];
+                    y[1] = 2 * x[1] * y[1] + y0[1];
+                    x[1] = temp[1];
+                    length_squared[1] = x[1] * x[1] + y[1] * y[1];
+                    ++repeats[1];
+                }
+                tmpImage[fetchedTask * width + curPixel[1]] = repeats[1];
+            }
+            // Fetch new task
+            
+            fetchedTask = curTask.fetch_add(1);
+        }
     }
+
+    MPI_Gather(tmpImage, width * yRange, MPI_INT, fullImage, width * yRange, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Finalize();
 
     /* draw and cleanup */
-    write_png(filename, iters, width, height, image);
-    free(image);
+    if (rank == 0) {
+        for (int i = 0; i < size; i++) {
+            int tmp = height / size;
+            if (i < (height % size))
+                tmp++;
+            for (int j = 0; j < tmp; j++) {
+                for (int k = 0; k < width; k++) {
+                    finalImage[(j * size + i) * width + k] = fullImage[(i * yRange + j) * width + k];
+                }
+            }
+        }
+
+        write_png(filename, iters, width, height, finalImage);
+        free(fullImage);
+    }
+
+    return 0;
 }
