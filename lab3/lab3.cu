@@ -7,22 +7,24 @@
 #define MASK_N 2
 #define MASK_X 5
 #define MASK_Y 5
+#define PROCESS_LENGTH 32
 #define SCALE 8
 
 /* Hint 7 */
 // this variable is used by device
-int mask[MASK_N][MASK_X][MASK_Y] = { 
-    {{ -1, -4, -6, -4, -1},
-     { -2, -8,-12, -8, -2},
-     {  0,  0,  0,  0,  0}, 
-     {  2,  8, 12,  8,  2}, 
-     {  1,  4,  6,  4,  1}},
-    {{ -1, -2,  0,  2,  1}, 
-     { -4, -8,  0,  8,  4}, 
-     { -6,-12,  0, 12,  6}, 
-     { -4, -8,  0,  8,  4}, 
-     { -1, -2,  0,  2,  1}} 
-};
+__constant__ int mask[MASK_N][MASK_X][MASK_Y];
+int cpuMask[MASK_N][MASK_X][MASK_Y] = { 
+        {{ -1, -4, -6, -4, -1},
+        { -2, -8,-12, -8, -2},
+        {  0,  0,  0,  0,  0}, 
+        {  2,  8, 12,  8,  2}, 
+        {  1,  4,  6,  4,  1}},
+        {{ -1, -2,  0,  2,  1}, 
+        { -4, -8,  0,  8,  4}, 
+        { -6,-12,  0, 12,  6}, 
+        { -4, -8,  0,  8,  4}, 
+        { -1, -2,  0,  2,  1}} 
+    };
 
 int read_png(const char* filename, unsigned char** image, unsigned* height, 
              unsigned* width, unsigned* channels) {
@@ -97,82 +99,124 @@ void write_png(const char* filename, png_bytep image, const unsigned height, con
 
 /* Hint 5 */
 // this function is called by host and executed by device
-void sobel (unsigned char* s, unsigned char* t, unsigned height, unsigned width, unsigned channels) {
+__global__ void sobel (unsigned char* s, unsigned char* t, unsigned height, unsigned width, unsigned channels) {
     int  x, y, i, v, u;
     int  R, G, B;
-    double val[MASK_N*3] = {0.0};
+    double val[MASK_N * 3] = {0.0};
     int adjustX, adjustY, xBound, yBound;
 
+    // Thread statistic
+    int threadIndex = threadIdx.y * blockDim.y + threadIdx.x;
+    int blkIndex = blockIdx.y * blockIdx.y + blockIdx.x; 
+
+    // Fetch this block's image
+    int imageSize = (PROCESS_LENGTH + 2) * (PROCESS_LENGTH + 2) * 3;
+    __shared__ unsigned char image[imageSize];
+
+    int cursorX = blockIdx.x * 32 - 2 + (threadIndex % 36);
+    int cursorY = blockIdx.y * 32 - 2 + (threadIndex / 36);
+    int writtenIndex = threadIndex;
+
+    if (cursorX >= 0 && cursorX < width && cursorY >= 0 && cursorY < height) {
+        image[writtenIndex * 3] = s[(cursorY * width + cursorX) * 3];
+        image[writtenIndex * 3 + 1] = s[(cursorY * width + cursorX) * 3 + 1];
+        image[writtenIndex * 3 + 2] = s[(cursorY * width + cursorX) * 3 + 2];
+    } else {
+        image[writtenIndex * 3] = 0;
+        image[writtenIndex * 3 + 1] = 0;
+        image[writtenIndex * 3 + 2] = 0;
+    }
+
+    cursorX = blockIdx.x * 32 - 2 + ((threadIndex + blockDim.x * blockDim.y) % 36);
+    cursorY = blockIdx.y * 32 - 2 + ((threadIndex + blockDim.x * blockDim.y) / 36);
+    writtenIndex = threadIndex + blockDim.x * blockDim.y;
+
+    if (cursorX >= 0 && cursorX < width && cursorY >= 0 && cursorY < height) {
+        image[writtenIndex * 3] = s[(cursorY * width + cursorX) * 3];
+        image[writtenIndex * 3 + 1] = s[(cursorY * width + cursorX) * 3 + 1];
+        image[writtenIndex * 3 + 2] = s[(cursorY * width + cursorX) * 3 + 2];
+    } else {
+        image[writtenIndex * 3] = 0;
+        image[writtenIndex * 3 + 1] = 0;
+        image[writtenIndex * 3 + 2] = 0;
+    }
+
+    __syncthreads();
+
     /* Hint 6 */
-    // parallel job by blockIdx, blockDim, threadIdx 
-    for (y = 0; y < height; ++y) {
-        for (x = 0; x < width; ++x) {
+    // parallel job by blockIdx, blockDim, threadIdx
+    for (v = -yBound; v < yBound + adjustY; ++v) {
+        for (u = -xBound; u < xBound + adjustX; ++u) {
+            R = image[channels * (width * (threadIdx.y + v) + (threadIdx.x + u)) + 2];
+            G = image[channels * (width * (threadIdx.y + v) + (threadIdx.x + u)) + 1];
+            B = image[channels * (width * (threadIdx.y + v) + (threadIdx.x + u)) + 0];
+
             for (i = 0; i < MASK_N; ++i) {
-                adjustX = (MASK_X % 2) ? 1 : 0;
-                adjustY = (MASK_Y % 2) ? 1 : 0;
-                xBound = MASK_X /2;
-                yBound = MASK_Y /2;
-
-                val[i*3+2] = 0.0;
-                val[i*3+1] = 0.0;
-                val[i*3] = 0.0;
-
-                for (v = -yBound; v < yBound + adjustY; ++v) {
-                    for (u = -xBound; u < xBound + adjustX; ++u) {
-                        if ((x + u) >= 0 && (x + u) < width && y + v >= 0 && y + v < height) {
-                            R = s[channels * (width * (y+v) + (x+u)) + 2];
-                            G = s[channels * (width * (y+v) + (x+u)) + 1];
-                            B = s[channels * (width * (y+v) + (x+u)) + 0];
-                            val[i*3+2] += R * mask[i][u + xBound][v + yBound];
-                            val[i*3+1] += G * mask[i][u + xBound][v + yBound];
-                            val[i*3+0] += B * mask[i][u + xBound][v + yBound];
-                        }    
-                    }
-                }
+                val[i * 3 + 2] += R * mask[i][u + xBound][v + yBound];
+                val[i * 3 + 1] += G * mask[i][u + xBound][v + yBound];
+                val[i * 3] += B * mask[i][u + xBound][v + yBound];
+                val[i * 3 + 2] += R * mask[i][u + xBound][v + yBound];
+                val[i * 3 + 1] += G * mask[i][u + xBound][v + yBound];
+                val[i * 3] += B * mask[i][u + xBound][v + yBound];
             }
-
-            double totalR = 0.0;
-            double totalG = 0.0;
-            double totalB = 0.0;
-            for (i = 0; i < MASK_N; ++i) {
-                totalR += val[i * 3 + 2] * val[i * 3 + 2];
-                totalG += val[i * 3 + 1] * val[i * 3 + 1];
-                totalB += val[i * 3 + 0] * val[i * 3 + 0];
-            }
-
-            totalR = sqrt(totalR) / SCALE;
-            totalG = sqrt(totalG) / SCALE;
-            totalB = sqrt(totalB) / SCALE;
-            const unsigned char cR = (totalR > 255.0) ? 255 : totalR;
-            const unsigned char cG = (totalG > 255.0) ? 255 : totalG;
-            const unsigned char cB = (totalB > 255.0) ? 255 : totalB;
-            t[channels * (width * y + x) + 2] = cR;
-            t[channels * (width * y + x) + 1] = cG;
-            t[channels * (width * y + x) + 0] = cB;
         }
+    }
+
+    float totalR = 0.0;
+    float totalG = 0.0;
+    float totalB = 0.0;
+    for (i = 0; i < MASK_N; ++i) {
+        totalR += val[i * 3 + 2] * val[i * 3 + 2];
+        totalG += val[i * 3 + 1] * val[i * 3 + 1];
+        totalB += val[i * 3 + 0] * val[i * 3 + 0];
+    }
+
+    totalR = sqrt(totalR) / SCALE;
+    totalG = sqrt(totalG) / SCALE;
+    totalB = sqrt(totalB) / SCALE;
+    const unsigned char cR = (totalR > 255.0) ? 255 : totalR;
+    const unsigned char cG = (totalG > 255.0) ? 255 : totalG;
+    const unsigned char cB = (totalB > 255.0) ? 255 : totalB;
+    cursorX = blockIdx.x * 32 + threadIdx.x;
+    cursorY = blockIdx.y * 32 + threadIdx.y;
+
+    if (cursorX >= 0 && cursorX < width && cursorY >= 0 && cursorY < height) {
+        t[channels * (width * y + x) + 2] = cR;
+        t[channels * (width * y + x) + 1] = cG;
+        t[channels * (width * y + x) + 0] = cB;
     }
 }
 
 int main(int argc, char** argv) {
-
     assert(argc == 3);
     unsigned height, width, channels;
     unsigned char* host_s = NULL;
     read_png(argv[1], &host_s, &height, &width, &channels);
-    unsigned char* host_t = (unsigned char*) malloc(height * width * channels * sizeof(unsigned char));
+    unsigned char* host_t = (unsigned char *) malloc(height * width * channels * sizeof(unsigned char));
     
     /* Hint 1 */
     // cudaMalloc(...) for device src and device dst
+    unsigned char* device_s;
+    cudaMalloc((void **) &device_s, height * width * channels * sizeof(unsigned char));
+    unsigned char* device_t;
+    cudaMalloc((void **) &device_t, height * width * channels * sizeof(unsigned char));
 
     /* Hint 2 */
     // cudaMemcpy(...) copy source image to device (filter matrix if necessary)
+    cudaMemcpy(device_s, host_s, height * width * channels * sizeof(int), cudaMemcpyHostToDevice); 
+    cudaMemcpyToSymbol(mask, cpuMask, MASK_N * MASK_X * MASK_Y * sizeof(int));
 
     /* Hint 3 */
     // acclerate this function
-    sobel(host_s, host_t, height, width, channels);
+    dim3 blk(PROCESS_LENGTH, PROCESS_LENGTH);
+    dim3 grid(width / PROCESS_LENGTH + 1, height / PROCESS_LENGTH + 1);
+    
+    sobel<<< grid, blk >>>(device_s, device_t, height, width, channels);
     
     /* Hint 4 */
     // cudaMemcpy(...) copy result image to host
+    cudaMemcpy(host_t, device_t, height * width * channels * sizeof(int), cudaMemcpyDeviceToHost);
+
     write_png(argv[2], host_t, height, width, channels);
 
     return 0;
