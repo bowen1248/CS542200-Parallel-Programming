@@ -1,4 +1,3 @@
-#include <iostream>
 #include <cstdlib>
 #include <cassert>
 #include <zlib.h>
@@ -100,23 +99,20 @@ void write_png(const char* filename, png_bytep image, const unsigned height, con
 /* Hint 5 */
 // this function is called by host and executed by device
 __global__ void sobel (unsigned char* s, unsigned char* t, unsigned height, unsigned width, unsigned channels) {
-    int  x, y, i, v, u;
+    int  i, x, y;
     int  R, G, B;
     double val[MASK_N * 3] = {0.0};
-    int adjustX, adjustY, xBound, yBound;
-
+    
     // Thread statistic
     int threadIndex = threadIdx.y * blockDim.y + threadIdx.x;
-    int blkIndex = blockIdx.y * blockIdx.y + blockIdx.x; 
 
-    // Fetch this block's image
-    int imageSize = (PROCESS_LENGTH + 2) * (PROCESS_LENGTH + 2) * 3;
-    __shared__ unsigned char image[imageSize];
+    // Create a 36 * 36 image for this block to run
+    __shared__ unsigned char image[(PROCESS_LENGTH + 4) * (PROCESS_LENGTH + 4) * 3];
 
     int cursorX = blockIdx.x * 32 - 2 + (threadIndex % 36);
     int cursorY = blockIdx.y * 32 - 2 + (threadIndex / 36);
     int writtenIndex = threadIndex;
-
+    
     if (cursorX >= 0 && cursorX < width && cursorY >= 0 && cursorY < height) {
         image[writtenIndex * 3] = s[(cursorY * width + cursorX) * 3];
         image[writtenIndex * 3 + 1] = s[(cursorY * width + cursorX) * 3 + 1];
@@ -131,33 +127,32 @@ __global__ void sobel (unsigned char* s, unsigned char* t, unsigned height, unsi
     cursorY = blockIdx.y * 32 - 2 + ((threadIndex + blockDim.x * blockDim.y) / 36);
     writtenIndex = threadIndex + blockDim.x * blockDim.y;
 
-    if (cursorX >= 0 && cursorX < width && cursorY >= 0 && cursorY < height) {
-        image[writtenIndex * 3] = s[(cursorY * width + cursorX) * 3];
-        image[writtenIndex * 3 + 1] = s[(cursorY * width + cursorX) * 3 + 1];
-        image[writtenIndex * 3 + 2] = s[(cursorY * width + cursorX) * 3 + 2];
-    } else {
-        image[writtenIndex * 3] = 0;
-        image[writtenIndex * 3 + 1] = 0;
-        image[writtenIndex * 3 + 2] = 0;
+    if (writtenIndex < (PROCESS_LENGTH + 4) * (PROCESS_LENGTH + 4)) {
+        if (cursorX >= 0 && cursorX < width && cursorY >= 0 && cursorY < height) {
+            image[writtenIndex * 3] = s[(cursorY * width + cursorX) * 3];
+            image[writtenIndex * 3 + 1] = s[(cursorY * width + cursorX) * 3 + 1];
+            image[writtenIndex * 3 + 2] = s[(cursorY * width + cursorX) * 3 + 2];
+        } else {
+            image[writtenIndex * 3] = 0;
+            image[writtenIndex * 3 + 1] = 0;
+            image[writtenIndex * 3 + 2] = 0;
+        }
     }
 
     __syncthreads();
 
-    /* Hint 6 */
-    // parallel job by blockIdx, blockDim, threadIdx
-    for (v = -yBound; v < yBound + adjustY; ++v) {
-        for (u = -xBound; u < xBound + adjustX; ++u) {
-            R = image[channels * (width * (threadIdx.y + v) + (threadIdx.x + u)) + 2];
-            G = image[channels * (width * (threadIdx.y + v) + (threadIdx.x + u)) + 1];
-            B = image[channels * (width * (threadIdx.y + v) + (threadIdx.x + u)) + 0];
+    // /* Hint 6 */
+    // Do convolution for this specific output pixel by blockIdx, blockDim, threadIdx
+    for (y = 0; y < 5; y++) {
+        for (x = 0; x < 5; x++) {
+            R = image[channels * ((threadIdx.y + y) * (PROCESS_LENGTH + 4) + (threadIdx.x + x)) + 2];
+            G = image[channels * ((threadIdx.y + y) * (PROCESS_LENGTH + 4) + (threadIdx.x + x)) + 1];
+            B = image[channels * ((threadIdx.y + y) * (PROCESS_LENGTH + 4) + (threadIdx.x + x)) + 0];
 
             for (i = 0; i < MASK_N; ++i) {
-                val[i * 3 + 2] += R * mask[i][u + xBound][v + yBound];
-                val[i * 3 + 1] += G * mask[i][u + xBound][v + yBound];
-                val[i * 3] += B * mask[i][u + xBound][v + yBound];
-                val[i * 3 + 2] += R * mask[i][u + xBound][v + yBound];
-                val[i * 3 + 1] += G * mask[i][u + xBound][v + yBound];
-                val[i * 3] += B * mask[i][u + xBound][v + yBound];
+                val[i * 3 + 2] += R * mask[i][x][y];
+                val[i * 3 + 1] += G * mask[i][x][y];
+                val[i * 3] += B * mask[i][x][y];
             }
         }
     }
@@ -181,9 +176,9 @@ __global__ void sobel (unsigned char* s, unsigned char* t, unsigned height, unsi
     cursorY = blockIdx.y * 32 + threadIdx.y;
 
     if (cursorX >= 0 && cursorX < width && cursorY >= 0 && cursorY < height) {
-        t[channels * (width * y + x) + 2] = cR;
-        t[channels * (width * y + x) + 1] = cG;
-        t[channels * (width * y + x) + 0] = cB;
+        t[channels * (width * cursorY + cursorX) + 2] = cR;
+        t[channels * (width * cursorY + cursorX) + 1] = cG;
+        t[channels * (width * cursorY + cursorX) + 0] = cB;
     }
 }
 
@@ -197,25 +192,25 @@ int main(int argc, char** argv) {
     /* Hint 1 */
     // cudaMalloc(...) for device src and device dst
     unsigned char* device_s;
-    cudaMalloc((void **) &device_s, height * width * channels * sizeof(unsigned char));
     unsigned char* device_t;
+    cudaMalloc((void **) &device_s, height * width * channels * sizeof(unsigned char));
     cudaMalloc((void **) &device_t, height * width * channels * sizeof(unsigned char));
 
-    /* Hint 2 */
-    // cudaMemcpy(...) copy source image to device (filter matrix if necessary)
-    cudaMemcpy(device_s, host_s, height * width * channels * sizeof(int), cudaMemcpyHostToDevice); 
+    // /* Hint 2 */
+    // // cudaMemcpy(...) copy source image to device (filter matrix if necessary)
+    cudaMemcpy(device_s, host_s, height * width * channels * sizeof(unsigned char), cudaMemcpyHostToDevice); 
     cudaMemcpyToSymbol(mask, cpuMask, MASK_N * MASK_X * MASK_Y * sizeof(int));
 
-    /* Hint 3 */
-    // acclerate this function
+    // /* Hint 3 */
+    // // // acclerate this function
     dim3 blk(PROCESS_LENGTH, PROCESS_LENGTH);
     dim3 grid(width / PROCESS_LENGTH + 1, height / PROCESS_LENGTH + 1);
-    
+
     sobel<<< grid, blk >>>(device_s, device_t, height, width, channels);
     
     /* Hint 4 */
     // cudaMemcpy(...) copy result image to host
-    cudaMemcpy(host_t, device_t, height * width * channels * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(host_t, device_t, height * width * channels * sizeof(unsigned char), cudaMemcpyDeviceToHost);
 
     write_png(argv[2], host_t, height, width, channels);
 

@@ -1,7 +1,7 @@
 NVCCFLAGS  = -O3 -std=c++11 -Xptxas=-v -arch=sm_61
 NVCC     = nvcc 
 LDFLAGS = -lpng -lz
-
+DEBUGFLAGS = -g -G
 TARGETS = lab3
 
 .PHONY: all
