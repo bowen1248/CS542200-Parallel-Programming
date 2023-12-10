@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
     //     std::cout << std::endl;
     // }
 
-#pragma omp parallel num_threads(12) shared(adjMat)
+#pragma omp parallel num_threads(ncpus) shared(adjMat)
 {
     for (int k_start = 0; k_start < n; k_start += BLOCK_SIZE) {
         // stage 1
