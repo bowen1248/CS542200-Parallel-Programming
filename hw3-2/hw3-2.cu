@@ -9,11 +9,8 @@
 
 __device__ void block_APSP(int* C, int* A, int* B, int x, int y) {
     for (int k = 0; k < BLOCK_SIZE; k++) {
-        int sum = A[y * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + x];
         // printf("%d %d %d %d %d %d\n", blockIdx.y, blockIdx.x, y, x, A[y * BLOCK_SIZE + k], B[k * BLOCK_SIZE + x]);
-        if (C[y * BLOCK_SIZE + x] > sum) {
-            C[y * BLOCK_SIZE + x] = sum;
-        }
+        C[y * BLOCK_SIZE + x] = min(C[y * BLOCK_SIZE + x], A[y * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + x]);
         __syncthreads();
     }
 }
@@ -87,7 +84,7 @@ __global__ void stage3(int *devMat, int startIdx, int n) {
     // Load adj. matrix from global memory to shared memory
     int cursorX = blockIdx.x * BLOCK_SIZE + threadIdx.x;
     int cursorY = blockIdx.y * BLOCK_SIZE + threadIdx.y;
-    
+    // long long int t1 = clock64();
     if ((blockIdx.x * BLOCK_SIZE) == startIdx || (blockIdx.y * BLOCK_SIZE) == startIdx)
         return;
 
@@ -99,13 +96,17 @@ __global__ void stage3(int *devMat, int startIdx, int n) {
     mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + BLOCK_SIZE * BLOCK_SIZE] = devMat[cursorY * n + startIdx + threadIdx.x];
     mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + 2 * BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + threadIdx.y) * n + cursorX];
     __syncthreads();
-
+    // long long int t2 = clock64();
+    // printf("%lld ", (t2 - t1));
     // Perform APSP on the block
     block_APSP(mat, &mat[BLOCK_SIZE * BLOCK_SIZE], &mat[2 * BLOCK_SIZE * BLOCK_SIZE], threadIdx.x, threadIdx.y);
-
+    // long long int t3 = clock64();
+    // printf("%lld ", (t3 - t2));
     // Write data back to global memory
     devMat[cursorY * n + cursorX] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
     __syncthreads();
+    // long long int t4 = clock64();
+    // printf("%lld ", (t4 - t3));
 }
 
 int main(int argc, char **argv) {
@@ -123,9 +124,6 @@ int main(int argc, char **argv) {
     assert(argc == 3);
     const char *inputFile = argv[1];
     const char *outputFile = argv[2];
-
-    // const char *inputFile = "./cases/c01.1";
-    // const char *outputFile = "./output/c01.1.out";
 
     FILE *inFp = fopen(inputFile, "rb");
     FILE *outFp = fopen(outputFile, "wb");
@@ -145,7 +143,7 @@ int main(int argc, char **argv) {
 
     // Create adjanency matrix
     int *adjMat = (int *) malloc(n * n * sizeof(int));
-    int *ansMat = (int *) malloc(n * n * sizeof(int));
+
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             if (i == j)
@@ -174,6 +172,15 @@ int main(int argc, char **argv) {
     //     std::cout << std::endl;
     // }
 
+    // Stream number
+    // const int nStreams = 8;
+
+    // Init streams
+    // cudaStream_t streams[nStreams];
+    // for (int i = 0; i < nStreams; i++) {
+    //     cudaStreamCreate(&streams[i]);
+    // }
+
     int* device_adjMat;
     cudaMalloc((void **) &device_adjMat, n * n * sizeof(int));
 
@@ -182,14 +189,14 @@ int main(int argc, char **argv) {
 
     // stages
     for (int k_start = 0; k_start < n; k_start += BLOCK_SIZE) {
-        stage1<<< 1, dim3(BLOCK_SIZE, BLOCK_SIZE) >>> (device_adjMat, k_start, n);
-        stage2_row<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE) >>> (device_adjMat, k_start, n);
-        stage2_col<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE) >>> (device_adjMat, k_start, n);
-        stage3<<< dim3(block_dim, block_dim), dim3(BLOCK_SIZE, BLOCK_SIZE) >>> (device_adjMat, k_start, n);
+        stage1<<< 1, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
+        stage2_row<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
+        stage2_col<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
+        stage3<<< dim3(block_dim, block_dim), dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
     }
 
     // output
-    cudaMemcpy(ansMat, device_adjMat, n * n * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(adjMat, device_adjMat, n * n * sizeof(int), cudaMemcpyDeviceToHost);
 
     // Print input graph
     // for (int i = 0; i < verticesTotal; i++) {
@@ -203,7 +210,7 @@ int main(int argc, char **argv) {
     // }
 
     for (int i = 0; i < verticesTotal; i++) {
-        fwrite(&ansMat[i * n], sizeof(int), verticesTotal, outFp);
+        fwrite(&adjMat[i * n], sizeof(int), verticesTotal, outFp);
     }
     fclose(outFp);
 
