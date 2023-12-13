@@ -10,12 +10,11 @@
 __device__ void block_APSP(short *C, short *A, short *B, int x, int y) {
     for (int k = 0; k < BLOCK_SIZE; k++) {
         // printf("%d %d %d %d %d %d\n", blockIdx.y, blockIdx.x, y, x, A[y * BLOCK_SIZE + k], B[k * BLOCK_SIZE + x]);
-        for (int i = y; i < BLOCK_SIZE; i += blockDim.y) {
-            for (int j = x; j < BLOCK_SIZE; j += blockDim.x) {
-                C[i * BLOCK_SIZE + j] = min(A[i * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + j], C[i * BLOCK_SIZE + j]);
+        C[threadIdx.y * BLOCK_SIZE + threadIdx.x] = min(A[threadIdx.y * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + threadIdx.x], C[threadIdx.y * BLOCK_SIZE + threadIdx.x]);
+        C[threadIdx.y * BLOCK_SIZE + (threadIdx.x + 32)] = min(A[threadIdx.y * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + (threadIdx.x + 32)], C[threadIdx.y * BLOCK_SIZE + (threadIdx.x + 32)]);
+        C[(threadIdx.y + 32) * BLOCK_SIZE + threadIdx.x] = min(A[(threadIdx.y + 32) * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + threadIdx.x], C[(threadIdx.y + 32) * BLOCK_SIZE + threadIdx.x]);
+        C[(threadIdx.y + 32) * BLOCK_SIZE + (threadIdx.x + 32)] = min(A[(threadIdx.y + 32) * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + (threadIdx.x + 32)], C[(threadIdx.y + 32) * BLOCK_SIZE + (threadIdx.x + 32)]);
                 // C[i * BLOCK_SIZE + j] = __viaddmax_s16x2((unsigned int) A[i * BLOCK_SIZE + k], (unsigned int) B[k * BLOCK_SIZE + j]);
-            }
-        }
         __syncthreads();
     }
 }
@@ -148,7 +147,7 @@ __global__ void stage3(short *devMat, int startIdx, int n) {
 }
 
 int main(int argc, char **argv) {
-    // freopen("log.txt","w",stdout);
+    freopen("log.txt","w",stdout);
     /* detect how many CPUs are available */
     // cpu_set_t cpu_set;
     // int ncpus;
@@ -171,14 +170,14 @@ int main(int argc, char **argv) {
     }
     int verticesTotal;
     int edgesTotal;
-
+    
     // Get input vertices and edges number
     size_t _;
     _ = fread(&verticesTotal, sizeof(int), 1, inFp);
     _ = fread(&edgesTotal, sizeof(int), 1, inFp);
     static int block_dim = (verticesTotal + BLOCK_SIZE - 1) / BLOCK_SIZE;
     static int n = BLOCK_SIZE * block_dim;
-
+printf("%d %d ", verticesTotal, edgesTotal);
     // Create adjanency matrix
     short *adjMat = (short *) malloc(n * n * sizeof(short));
 
@@ -238,14 +237,14 @@ int main(int argc, char **argv) {
     //     std::cout << std::endl;
     // }
 
-    for (int i = 0; i < verticesTotal; i++) {
-        for (int j = 0; j < verticesTotal; j++) {
-            int tmp = (int) adjMat[i * n + j];
-            if (tmp == 10000)
-                tmp = INF;
-            fwrite(&tmp, sizeof(int), 1, outFp);
-        }
-    }
+    // for (int i = 0; i < verticesTotal; i++) {
+    //     for (int j = 0; j < verticesTotal; j++) {
+    //         int tmp = (int) adjMat[i * n + j];
+    //         if (tmp == 10000)
+    //             tmp = INF;
+    //         fwrite(&tmp, sizeof(int), 1, outFp);
+    //     }
+    // }
     fclose(outFp);
 
     return 0;
