@@ -172,15 +172,6 @@ int main(int argc, char **argv) {
     //     std::cout << std::endl;
     // }
 
-    // Stream number
-    // const int nStreams = 8;
-
-    // Init streams
-    // cudaStream_t streams[nStreams];
-    // for (int i = 0; i < nStreams; i++) {
-    //     cudaStreamCreate(&streams[i]);
-    // }
-
     int* device_adjMat;
     cudaMalloc((void **) &device_adjMat, n * n * sizeof(int));
 
