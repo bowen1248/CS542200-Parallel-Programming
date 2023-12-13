@@ -23,8 +23,8 @@ __global__ void stage1(int *devMat, int startIdx, int n) {
     __shared__ int mat[BLOCK_SIZE * BLOCK_SIZE];
     // Start idx is the most left upper coordinate
     // Load adj. matrix from global memory to shared memory
-    for (int i = threadIdx.y; i < BLOCK_SIZE; i += 32) {
-        for (int j = threadIdx.x; j < BLOCK_SIZE; j += 32) {
+    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
+        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
             mat[i * BLOCK_SIZE + j] = devMat[(startIdx + i) * n + (startIdx + j)];
         }
     }
@@ -34,8 +34,8 @@ __global__ void stage1(int *devMat, int startIdx, int n) {
     block_APSP(mat, mat, mat, threadIdx.x, threadIdx.y);
 
     // Write data back to global memory
-    for (int i = threadIdx.y; i < BLOCK_SIZE; i += 32) {
-        for (int j = threadIdx.x; j < BLOCK_SIZE; j += 32) {
+    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
+        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
             devMat[(startIdx + i) * n + (startIdx + j)] = mat[i * BLOCK_SIZE + j];
         }
     }
@@ -46,8 +46,8 @@ __global__ void stage1(int *devMat, int startIdx, int n) {
 
 __global__ void stage2_row(int *devMat, int startIdx, int n) {
     // Load adj. matrix from global memory to shared memory
-    int cursorX = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-    int cursorY = startIdx + threadIdx.y;
+    // int cursorX = blockIdx.x * 32 + threadIdx.x;
+    // int cursorY = startIdx + threadIdx.y;
 
     if ((blockIdx.x * BLOCK_SIZE) == startIdx)
         return;
@@ -56,22 +56,30 @@ __global__ void stage2_row(int *devMat, int startIdx, int n) {
     __shared__ int mat[2 * BLOCK_SIZE * BLOCK_SIZE];
 
     // Load adj. matrixs from global memory to shared memory
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = devMat[cursorY * n + cursorX];
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + BLOCK_SIZE * BLOCK_SIZE] = devMat[cursorY * n + startIdx + threadIdx.x];
+    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
+        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
+            mat[i * BLOCK_SIZE + j] = devMat[(startIdx + i) * n + (blockIdx.x * BLOCK_SIZE + j)];
+            mat[i * BLOCK_SIZE + j + BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + i) * n + startIdx + j];
+        }
+    }
     __syncthreads();
 
     // Perform APSP on the block
     block_APSP(mat, &mat[BLOCK_SIZE * BLOCK_SIZE], mat, threadIdx.x, threadIdx.y);
 
     // Write data back to global memory
-    devMat[cursorY * n + cursorX] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
+    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
+        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
+            devMat[(startIdx + i) * n + (blockIdx.x * BLOCK_SIZE + j)] = mat[i * BLOCK_SIZE + j];
+        }
+    }
     __syncthreads();
 }
 
 __global__ void stage2_col(int *devMat, int startIdx, int n) {
     // Load adj. matrix from global memory to shared memory
-    int cursorX = startIdx + threadIdx.x;
-    int cursorY = blockIdx.x * BLOCK_SIZE + threadIdx.y;
+    // int cursorX = startIdx + threadIdx.x;
+    // int cursorY = blockIdx.x * BLOCK_SIZE + threadIdx.y;
     
     if ((blockIdx.x * BLOCK_SIZE) == startIdx)
         return;
@@ -80,22 +88,30 @@ __global__ void stage2_col(int *devMat, int startIdx, int n) {
     __shared__ int mat[2 * BLOCK_SIZE * BLOCK_SIZE];
 
     // Load adj. matrixs from global memory to shared memory
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = devMat[cursorY * n + cursorX];
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + threadIdx.y) * n + cursorX];
+    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
+        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
+            mat[i * BLOCK_SIZE + j] = devMat[(blockIdx.x * BLOCK_SIZE + i) * n + (startIdx + j)];
+            mat[i * BLOCK_SIZE + j + BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + i) * n + (startIdx + j)];
+        }
+    }
     __syncthreads();
 
     // Perform APSP on the block
     block_APSP(mat, mat, &mat[BLOCK_SIZE * BLOCK_SIZE], threadIdx.x, threadIdx.y);
 
     // Write data back to global memory
-    devMat[cursorY * n + cursorX] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
+    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
+        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
+            devMat[(blockIdx.x * BLOCK_SIZE + i) * n + (startIdx + j)] = mat[i * BLOCK_SIZE + j];
+        }
+    }
     __syncthreads();
 }
 
 __global__ void stage3(int *devMat, int startIdx, int n) {
     // Load adj. matrix from global memory to shared memory
-    int cursorX = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-    int cursorY = blockIdx.y * BLOCK_SIZE + threadIdx.y;
+    // int cursorX = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+    // int cursorY = blockIdx.y * BLOCK_SIZE + threadIdx.y;
     // long long int t1 = clock64();
     if ((blockIdx.x * BLOCK_SIZE) == startIdx || (blockIdx.y * BLOCK_SIZE) == startIdx)
         return;
@@ -104,9 +120,14 @@ __global__ void stage3(int *devMat, int startIdx, int n) {
     __shared__ int mat[3 * BLOCK_SIZE * BLOCK_SIZE];
 
     // Load adj. matrixs from global memory to shared memory
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = devMat[cursorY * n + cursorX];
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + BLOCK_SIZE * BLOCK_SIZE] = devMat[cursorY * n + startIdx + threadIdx.x];
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + 2 * BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + threadIdx.y) * n + cursorX];
+    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
+        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
+            mat[i * BLOCK_SIZE + j] = devMat[(blockIdx.y * BLOCK_SIZE + i) * n + (blockIdx.x * BLOCK_SIZE + j)];
+            mat[i * BLOCK_SIZE + j + BLOCK_SIZE * BLOCK_SIZE] = devMat[(blockIdx.y * BLOCK_SIZE + i) * n + (startIdx + j)];
+            mat[i * BLOCK_SIZE + j + 2 * BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + i) * n + (blockIdx.x * BLOCK_SIZE + j)];
+        }
+    }
+
     __syncthreads();
     // long long int t2 = clock64();
     // printf("%lld ", (t2 - t1));
@@ -115,7 +136,11 @@ __global__ void stage3(int *devMat, int startIdx, int n) {
     // long long int t3 = clock64();
     // printf("%lld ", (t3 - t2));
     // Write data back to global memory
-    devMat[cursorY * n + cursorX] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
+    for (int i = threadIdx.y; i < BLOCK_SIZE; i += 32) {
+        for (int j = threadIdx.x; j < BLOCK_SIZE; j += 32) {
+            devMat[(blockIdx.y * BLOCK_SIZE + i) * n + (blockIdx.x * BLOCK_SIZE + j)] = mat[i * BLOCK_SIZE + j];
+        }
+    }
     __syncthreads();
     // long long int t4 = clock64();
     // printf("%lld ", (t4 - t3));
@@ -193,9 +218,9 @@ int main(int argc, char **argv) {
     // stages
     for (int k_start = 0; k_start < n; k_start += BLOCK_SIZE) {
         stage1<<< 1, dim3(32, 32), 0 >>> (device_adjMat, k_start, n);
-        // stage2_row<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
-        // stage2_col<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
-        // stage3<<< dim3(block_dim, block_dim), dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
+        stage2_row<<< block_dim, dim3(32, 32), 0 >>> (device_adjMat, k_start, n);
+        stage2_col<<< block_dim, dim3(32, 32), 0 >>> (device_adjMat, k_start, n);
+        stage3<<< dim3(block_dim, block_dim), dim3(32, 32), 0 >>> (device_adjMat, k_start, n);
     }
 
     // output
