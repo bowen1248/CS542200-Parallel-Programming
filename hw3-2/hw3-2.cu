@@ -10,9 +10,9 @@
 __device__ void block_APSP(int* C, int* A, int* B, int x, int y) {
     for (int k = 0; k < BLOCK_SIZE; k++) {
         // printf("%d %d %d %d %d %d\n", blockIdx.y, blockIdx.x, y, x, A[y * BLOCK_SIZE + k], B[k * BLOCK_SIZE + x]);
-        for (int i = 0; i < BLOCK_SIZE; i += 32) {
-            for (int j = 0; j < BLOCK_SIZE; j += 32) {
-                C[(y + i) * BLOCK_SIZE + (x + j)] = min(C[(y + i) * BLOCK_SIZE + (x + j)], A[(y + i) * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + (x + j)]);
+        for (int i = y; i < BLOCK_SIZE; i += 32) {
+            for (int j = x; j < BLOCK_SIZE; j += 32) {
+                C[i * BLOCK_SIZE + j] = min(C[i * BLOCK_SIZE + j], A[i * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + j]);
             }
         }
         __syncthreads();
@@ -21,13 +21,11 @@ __device__ void block_APSP(int* C, int* A, int* B, int x, int y) {
 
 __global__ void stage1(int *devMat, int startIdx, int n) {
     __shared__ int mat[BLOCK_SIZE * BLOCK_SIZE];
-
+    // Start idx is the most left upper coordinate
     // Load adj. matrix from global memory to shared memory
-    int cursorX = startIdx + threadIdx.x;
-    int cursorY = startIdx + threadIdx.y;
-    for (int i = 0; i < BLOCK_SIZE; i += 32) {
-        for (int j = 0; j < BLOCK_SIZE; j += 32) {
-            mat[(threadIdx.y + i) * BLOCK_SIZE + (threadIdx.x + j)] = devMat[(cursorY + i) * n + (cursorX + j)];
+    for (int i = threadIdx.y; i < BLOCK_SIZE; i += 32) {
+        for (int j = threadIdx.x; j < BLOCK_SIZE; j += 32) {
+            mat[i * BLOCK_SIZE + j] = devMat[(startIdx + i) * n + (startIdx + j)];
         }
     }
     __syncthreads();
@@ -36,9 +34,9 @@ __global__ void stage1(int *devMat, int startIdx, int n) {
     block_APSP(mat, mat, mat, threadIdx.x, threadIdx.y);
 
     // Write data back to global memory
-    for (int i = 0; i < BLOCK_SIZE; i += 32) {
-        for (int j = 0; j < BLOCK_SIZE; j += 32) {
-            devMat[(cursorY + i) * n + (cursorX + j)] = mat[(threadIdx.y + i) * BLOCK_SIZE + (threadIdx.x + j)];
+    for (int i = threadIdx.y; i < BLOCK_SIZE; i += 32) {
+        for (int j = threadIdx.x; j < BLOCK_SIZE; j += 32) {
+            devMat[(startIdx + i) * n + (startIdx + j)] = mat[i * BLOCK_SIZE + j];
         }
     }
 
