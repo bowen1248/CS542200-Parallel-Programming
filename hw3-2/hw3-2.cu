@@ -193,9 +193,9 @@ int main(int argc, char **argv) {
     // stages
     for (int k_start = 0; k_start < n; k_start += BLOCK_SIZE) {
         stage1<<< 1, dim3(32, 32), 0 >>> (device_adjMat, k_start, n);
-        stage2_row<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
-        stage2_col<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
-        stage3<<< dim3(block_dim, block_dim), dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
+        // stage2_row<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
+        // stage2_col<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
+        // stage3<<< dim3(block_dim, block_dim), dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
     }
 
     // output
