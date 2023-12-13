@@ -26,6 +26,20 @@ int main(int argc, char **argv) {
     FILE *inFp1 = fopen(inputFile, "rb");
     FILE *inFp2 = fopen(answerFile, "rb");
     FILE *inFp3 = fopen(userFile, "rb");
+    if( inFp1 == NULL ) {
+        fprintf(stderr, "Couldn't open %s: %s\n", inputFile, strerror(errno));
+        exit(1);
+    }
+    if( inFp2 == NULL ) {
+        fprintf(stderr, "Couldn't open %s: %s\n", answerFile, strerror(errno));
+        exit(1);
+    }
+    if( inFp3 == NULL ) {
+        fprintf(stderr, "Couldn't open %s: %s\n", userFile, strerror(errno));
+        exit(1);
+    }
+
+
     int verticesTotal;
     int edgesTotal;
     
