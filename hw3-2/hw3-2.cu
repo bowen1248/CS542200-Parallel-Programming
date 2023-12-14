@@ -5,6 +5,7 @@
 #include <stdio.h>
 
 #define BLOCK_SIZE 32
+#define THREAD_NUMS 32
 #define INF 1073741823 // 2^30 - 1
 
 __device__ void block_APSP(int *C, int *A, int *B, int x, int y) {
@@ -15,22 +16,19 @@ __device__ void block_APSP(int *C, int *A, int *B, int x, int y) {
     }
 }
 
-__device__ void block_APSP_stage3(int *C, int *A, int *B, int x, int y) {
-    for (int k = 0; k < BLOCK_SIZE; k++) {
-        // printf("%d %d %d %d %d %d\n", blockIdx.y, blockIdx.x, y, x, A[y * BLOCK_SIZE + k], B[k * BLOCK_SIZE + x]);
-        C[y * BLOCK_SIZE + x] = min(C[y * BLOCK_SIZE + x], A[k] + B[k]);
-    }
-}
-
 __global__ void stage1(int *devMat, int startIdx, int n) {
     __shared__ int mat[BLOCK_SIZE * BLOCK_SIZE];
     // Start idx is the most left upper coordinate
     // Load adj. matrix from global memory to shared memory
     mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = devMat[(startIdx + threadIdx.y) * n + (startIdx + threadIdx.x)];
-    __syncthreads();
 
     // Perform APSP on the block
-    block_APSP(mat, mat, mat, threadIdx.x, threadIdx.y);
+    for (int k = 0; k < BLOCK_SIZE; k++) {
+        __syncthreads();
+        // printf("%d %d %d %d %d %d\n", blockIdx.y, blockIdx.x, y, x, A[y * BLOCK_SIZE + k], B[k * BLOCK_SIZE + x]);
+        mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = min(mat[threadIdx.y * BLOCK_SIZE + threadIdx.x], mat[threadIdx.y * BLOCK_SIZE + k] + mat[k * BLOCK_SIZE + threadIdx.x]);
+    }
+    // block_APSP(mat, mat, mat, threadIdx.x, threadIdx.y);
 
     // Write data back to global memory
     devMat[(startIdx + threadIdx.y) * n + (startIdx + threadIdx.x)] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
@@ -74,26 +72,22 @@ __global__ void stage3(int *devMat, int startIdx, int n) {
 
     // C[BLOCK_SIZE * BLOCK_SIZE], B[BLOCK_SIZE * BLOCK_SIZE], A[BLOCK_SIZE * BLOCK_SIZE]
     __shared__ int mat[3 * BLOCK_SIZE * BLOCK_SIZE];
-    //int B[BLOCK_SIZE];
-    //int C[BLOCK_SIZE];
 
     // Load adj. matrixs from global memory to shared memory
     mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)];
     mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + BLOCK_SIZE * BLOCK_SIZE] = devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (startIdx + threadIdx.x)];
     mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + 2 * BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)];
-    // for (int i = 0; i < BLOCK_SIZE; i++) {
-    //     B[i] = devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (startIdx + i)];
-    //     C[i] = devMat[(startIdx + i) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)];
-    // }
 
     __syncthreads();
 
     // Perform APSP on the block
-    block_APSP(mat, &mat[BLOCK_SIZE * BLOCK_SIZE], &mat[2 * BLOCK_SIZE * BLOCK_SIZE], threadIdx.x, threadIdx.y);
-    // block_APSP_stage3(mat, B, C, threadIdx.x, threadIdx.y);
+    int tmp = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
+    for (int k = 0; k < BLOCK_SIZE; k++) {
+        tmp = min(tmp, mat[threadIdx.y * BLOCK_SIZE + k + BLOCK_SIZE * BLOCK_SIZE] + mat[k * BLOCK_SIZE + threadIdx.x + 2 * BLOCK_SIZE * BLOCK_SIZE]);
+    }
 
     // Write data back to global memory
-    devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
+    devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)] = tmp;
     __syncthreads();
 
     // long long int t4 = clock64();
@@ -102,14 +96,6 @@ __global__ void stage3(int *devMat, int startIdx, int n) {
 
 int main(int argc, char **argv) {
     // freopen("log.txt","w",stdout);
-    /* detect how many CPUs are available */
-    // cpu_set_t cpu_set;
-    // int ncpus;
-    // sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
-    // ncpus = CPU_COUNT(&cpu_set);
-
-    // // Thread handlers
-    // pthread_t threads[ncpus];
 
     /* argument parsing */
     assert(argc == 3);
@@ -118,10 +104,7 @@ int main(int argc, char **argv) {
 
     FILE *inFp = fopen(inputFile, "rb");
     FILE *outFp = fopen(outputFile, "wb");
-    // if( inFp == NULL ) {
-    //     fprintf(stderr, "Couldn't open %s: %s\n", inputFile, strerror(errno));
-    //     exit(1);
-    // }
+
     int verticesTotal;
     int edgesTotal;
     
@@ -135,7 +118,6 @@ int main(int argc, char **argv) {
 
     // Create adjanency matrix
     int *adjMat = (int *) malloc(n * n * sizeof(int));
-
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             if (i == j)
@@ -173,11 +155,6 @@ int main(int argc, char **argv) {
     //     std::cout << std::endl;
     // }
 
-    // cudaStream_t stream[20];
-    // for (int i = 0; i < 20; i++) {
-    //     cudaStreamCreate(&stream[i]);
-    // }
-
     int* device_adjMat;
     cudaMalloc((void **) &device_adjMat, n * n * sizeof(int));
 
@@ -186,12 +163,9 @@ int main(int argc, char **argv) {
 
     // stages
     for (int k_start = 0; k_start < n; k_start += BLOCK_SIZE) {
-        stage1<<< 1, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
-        stage2<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
-        // stage2_col<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
-        // for (int j = 0; j < 20; j++) {
-        stage3<<< dim3(block_dim, block_dim), dim3(BLOCK_SIZE, BLOCK_SIZE), 0, stream[j] >>> (device_adjMat, k_start, n);
-        //}
+        stage1<<< 1, dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (device_adjMat, k_start, n);
+        stage2<<< block_dim, dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (device_adjMat, k_start, n);
+        stage3<<< dim3(block_dim, block_dim), dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (device_adjMat, k_start, n);
     }
 
     // output
