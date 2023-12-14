@@ -4,90 +4,99 @@
 #include <math.h>
 #include <stdio.h>
 
-#define BLOCK_SIZE 32
+#define BLK_n 32
 #define THREAD_NUMS 32
 #define INF 1073741823 // 2^30 - 1
 
 __device__ void block_APSP(int *C, int *A, int *B, int x, int y) {
-    for (int k = 0; k < BLOCK_SIZE; k++) {
-        // printf("%d %d %d %d %d %d\n", blockIdx.y, blockIdx.x, y, x, A[y * BLOCK_SIZE + k], B[k * BLOCK_SIZE + x]);
-        C[y * BLOCK_SIZE + x] = min(C[y * BLOCK_SIZE + x], A[y * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + x]);
+    for (int k = 0; k < BLK_n; k++) {
+        // printf("%d %d %d %d %d %d\n", blockIdx.y, blockIdx.x, y, x, A[y * BLK_n + k], B[k * BLK_n + x]);
+        C[y * BLK_n + x] = min(C[y * BLK_n + x], A[y * BLK_n + k] + B[k * BLK_n + x]);
         __syncthreads();
     }
 }
 
-__global__ void stage1(int *devMat, int startIdx, int n) {
-    __shared__ int mat[BLOCK_SIZE * BLOCK_SIZE];
-    // Start idx is the most left upper coordinate
+__global__ void stage1(int *devMat, int g_k, int n) {
+    // Upperleft coordinate of this thread to global memory
+    int g_x = g_k + threadIdx.x;
+    int g_y = g_k + threadIdx.y;
+    // Upperleft coordinate of this thread to shared memory
+    int s_x = threadIdx.x;
+    int s_y = threadIdx.y;
+
+    __shared__ int mat[BLK_n * BLK_n];
+
     // Load adj. matrix from global memory to shared memory
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = devMat[(startIdx + threadIdx.y) * n + (startIdx + threadIdx.x)];
+    mat[s_y * BLK_n + s_x] = devMat[g_y * n + g_x];
 
     // Perform APSP on the block
-    for (int k = 0; k < BLOCK_SIZE; k++) {
+    for (int k = 0; k < BLK_n; k++) {
         __syncthreads();
-        // printf("%d %d %d %d %d %d\n", blockIdx.y, blockIdx.x, y, x, A[y * BLOCK_SIZE + k], B[k * BLOCK_SIZE + x]);
-        mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = min(mat[threadIdx.y * BLOCK_SIZE + threadIdx.x], mat[threadIdx.y * BLOCK_SIZE + k] + mat[k * BLOCK_SIZE + threadIdx.x]);
+        mat[s_y * BLK_n + s_x] = min(mat[s_y * BLK_n + s_x], mat[s_y * BLK_n + k] + mat[k * BLK_n + s_x]);
     }
-    // block_APSP(mat, mat, mat, threadIdx.x, threadIdx.y);
 
     // Write data back to global memory
-    devMat[(startIdx + threadIdx.y) * n + (startIdx + threadIdx.x)] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
+    devMat[g_y * n + g_x] = mat[s_y * BLK_n + s_x];
     __syncthreads();
 }
 
-__global__ void stage2(int *devMat, int startIdx, int n) {
-    // Load adj. matrix from global memory to shared memory
-    // int cursorX = blockIdx.x * 32 + threadIdx.x;
-    // int cursorY = startIdx + threadIdx.y;
-
-    if ((blockIdx.x * BLOCK_SIZE) == startIdx)
+__global__ void stage2(int *devMat, int g_k, int n) {
+    // Matrix to be changed
+    // Note blockidx.y 0 is row, 1 is column
+    int g_x1 = (blockIdx.x * BLK_n + threadIdx.x) * !blockIdx.y + (g_k + threadIdx.x) * blockIdx.y;
+    int g_y1 = (g_k + threadIdx.y) * !blockIdx.y + (blockIdx.x * BLK_n + threadIdx.x) * blockIdx.y;
+    // Matrix that is for refenerce
+    int g_x2 = g_k + threadIdx.x;
+    int g_y2 = g_k + threadIdx.y;
+    int s_x = threadIdx.x;
+    int s_y = threadIdx.y;
+    if ((blockIdx.x * BLK_n) == g_k)
         return;
 
-    __shared__ int mat[3 * BLOCK_SIZE * BLOCK_SIZE];
+    __shared__ int mat[2 * BLK_n * BLK_n];
 
     // Load adj. matrixs from global memory to shared memory
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = devMat[(startIdx + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)];
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + BLOCK_SIZE * BLOCK_SIZE] = devMat[(blockIdx.x * BLOCK_SIZE + threadIdx.y) * n + (startIdx + threadIdx.x)];
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + 2 * BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + threadIdx.y) * n + (startIdx + threadIdx.x)];
-
-    __syncthreads();
+    mat[s_y * BLK_n + s_x] = devMat[g_y1 * n + g_x1];
+    mat[s_y * BLK_n + s_x + BLK_n * BLK_n] = devMat[g_y2 * n + g_x2];
 
     // Perform APSP on the block
-    block_APSP(mat, &mat[2 * BLOCK_SIZE * BLOCK_SIZE], mat, threadIdx.x, threadIdx.y);
-    block_APSP(&mat[BLOCK_SIZE * BLOCK_SIZE], &mat[BLOCK_SIZE * BLOCK_SIZE], &mat[2 * BLOCK_SIZE * BLOCK_SIZE], threadIdx.x, threadIdx.y);
+    for (int k = 0; k < BLK_n; k++) {
+        __syncthreads();
+        mat[s_y * BLK_n + s_x] = min(mat[s_y * BLK_n + s_x], mat[s_y * BLK_n + k] + mat[k * BLK_n + s_x + BLK_n * BLK_n]);
+    }
 
     // Write data back to global memory
-    devMat[(startIdx + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
-    devMat[(blockIdx.x * BLOCK_SIZE + threadIdx.y) * n + (startIdx + threadIdx.x)] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + BLOCK_SIZE * BLOCK_SIZE];
+    devMat[g_y1 * n + g_x1] = mat[s_y * BLK_n + s_x];
+    devMat[g_y2 * n + g_x2] = mat[s_y * BLK_n + s_x + BLK_n * BLK_n];
     __syncthreads();
 }
 
 __global__ void stage3(int *devMat, int startIdx, int n) {
     // Load adj. matrix from global memory to shared memory
-    // int cursorX = blockIdx.x * BLOCK_SIZE + threadIdx.x;
-    // int cursorY = blockIdx.y * BLOCK_SIZE + threadIdx.y;
+    // int cursorX = blockIdx.x * BLK_n + threadIdx.x;
+    // int cursorY = blockIdx.y * BLK_n + threadIdx.y;
     // long long int t1 = clock64();
-    if ((blockIdx.x * BLOCK_SIZE) == startIdx || (blockIdx.y * BLOCK_SIZE) == startIdx)
+    if ((blockIdx.x * BLK_n) == startIdx || (blockIdx.y * BLK_n) == startIdx)
         return;
 
-    // C[BLOCK_SIZE * BLOCK_SIZE], B[BLOCK_SIZE * BLOCK_SIZE], A[BLOCK_SIZE * BLOCK_SIZE]
-    __shared__ int mat[3 * BLOCK_SIZE * BLOCK_SIZE];
+    // C[BLK_n * BLK_n], B[BLK_n * BLK_n], A[BLK_n * BLK_n]
+    __shared__ int mat[3 * BLK_n * BLK_n];
 
     // Load adj. matrixs from global memory to shared memory
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)];
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + BLOCK_SIZE * BLOCK_SIZE] = devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (startIdx + threadIdx.x)];
-    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + 2 * BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)];
+    mat[threadIdx.y * BLK_n + threadIdx.x] = devMat[(blockIdx.y * BLK_n + threadIdx.y) * n + (blockIdx.x * BLK_n + threadIdx.x)];
+    mat[threadIdx.y * BLK_n + threadIdx.x + BLK_n * BLK_n] = devMat[(blockIdx.y * BLK_n + threadIdx.y) * n + (startIdx + threadIdx.x)];
+    mat[threadIdx.y * BLK_n + threadIdx.x + 2 * BLK_n * BLK_n] = devMat[(startIdx + threadIdx.y) * n + (blockIdx.x * BLK_n + threadIdx.x)];
 
     __syncthreads();
 
     // Perform APSP on the block
-    int tmp = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
-    for (int k = 0; k < BLOCK_SIZE; k++) {
-        tmp = min(tmp, mat[threadIdx.y * BLOCK_SIZE + k + BLOCK_SIZE * BLOCK_SIZE] + mat[k * BLOCK_SIZE + threadIdx.x + 2 * BLOCK_SIZE * BLOCK_SIZE]);
+    int tmp = mat[threadIdx.y * BLK_n + threadIdx.x];
+    for (int k = 0; k < BLK_n; k++) {
+        tmp = min(tmp, mat[threadIdx.y * BLK_n + k + BLK_n * BLK_n] + mat[k * BLK_n + threadIdx.x + 2 * BLK_n * BLK_n]);
     }
 
     // Write data back to global memory
-    devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)] = tmp;
+    devMat[(blockIdx.y * BLK_n + threadIdx.y) * n + (blockIdx.x * BLK_n + threadIdx.x)] = tmp;
     __syncthreads();
 
     // long long int t4 = clock64();
@@ -112,8 +121,8 @@ int main(int argc, char **argv) {
     size_t _;
     _ = fread(&verticesTotal, sizeof(int), 1, inFp);
     _ = fread(&edgesTotal, sizeof(int), 1, inFp);
-    static int block_dim = (verticesTotal + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    static int n = BLOCK_SIZE * block_dim;
+    static int block_dim = (verticesTotal + BLK_n - 1) / BLK_n;
+    static int n = BLK_n * block_dim;
     // printf("%d %d ", verticesTotal, edgesTotal);
 
     // Create adjanency matrix
@@ -155,21 +164,21 @@ int main(int argc, char **argv) {
     //     std::cout << std::endl;
     // }
 
-    int* device_adjMat;
-    cudaMalloc((void **) &device_adjMat, n * n * sizeof(int));
+    int* devMat;
+    cudaMalloc((void **) &devMat, n * n * sizeof(int));
 
     // Put adjanency matrix to GPU
-    cudaMemcpy(device_adjMat, adjMat, n * n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(devMat, adjMat, n * n * sizeof(int), cudaMemcpyHostToDevice);
 
     // stages
-    for (int k_start = 0; k_start < n; k_start += BLOCK_SIZE) {
-        stage1<<< 1, dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (device_adjMat, k_start, n);
-        stage2<<< block_dim, dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (device_adjMat, k_start, n);
-        stage3<<< dim3(block_dim, block_dim), dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (device_adjMat, k_start, n);
+    for (int g_k = 0; g_k < n; g_k += BLK_n) {
+        stage1<<< 1, dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (devMat, g_k, n);
+        stage2<<< dim3(2, block_dim), dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (devMat, g_k, n);
+        stage3<<< dim3(block_dim, block_dim), dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (devMat, g_k, n);
     }
 
     // output
-    cudaMemcpy(adjMat, device_adjMat, n * n * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(adjMat, devMat, n * n * sizeof(int), cudaMemcpyDeviceToHost);
 
     // Print input graph
     // for (int i = 0; i < verticesTotal; i++) {
