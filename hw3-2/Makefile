@@ -1,4 +1,4 @@
-NVFLAGS  := -std=c++11 -O3 -Xptxas="-v" -arch=sm_61
+NVFLAGS  := -std=c++11 -O3 -Xptxas="-v" -arch=sm_61 --ptxas-options=-v
 LDFLAGS  := -lm
 EXES     := hw3-2
 

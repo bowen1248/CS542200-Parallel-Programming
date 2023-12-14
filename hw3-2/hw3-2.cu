@@ -4,47 +4,40 @@
 #include <math.h>
 #include <stdio.h>
 
-#define BLOCK_SIZE 64
+#define BLOCK_SIZE 16
 #define INF 1073741823 // 2^30 - 1
 
-__device__ void block_APSP(short *C, short *A, short *B, int x, int y) {
+__device__ void block_APSP(int *C, int *A, int *B, int x, int y) {
     for (int k = 0; k < BLOCK_SIZE; k++) {
         // printf("%d %d %d %d %d %d\n", blockIdx.y, blockIdx.x, y, x, A[y * BLOCK_SIZE + k], B[k * BLOCK_SIZE + x]);
-        C[threadIdx.y * BLOCK_SIZE + threadIdx.x] = min(A[threadIdx.y * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + threadIdx.x], C[threadIdx.y * BLOCK_SIZE + threadIdx.x]);
-        C[threadIdx.y * BLOCK_SIZE + (threadIdx.x + 32)] = min(A[threadIdx.y * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + (threadIdx.x + 32)], C[threadIdx.y * BLOCK_SIZE + (threadIdx.x + 32)]);
-        C[(threadIdx.y + 32) * BLOCK_SIZE + threadIdx.x] = min(A[(threadIdx.y + 32) * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + threadIdx.x], C[(threadIdx.y + 32) * BLOCK_SIZE + threadIdx.x]);
-        C[(threadIdx.y + 32) * BLOCK_SIZE + (threadIdx.x + 32)] = min(A[(threadIdx.y + 32) * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + (threadIdx.x + 32)], C[(threadIdx.y + 32) * BLOCK_SIZE + (threadIdx.x + 32)]);
-                // C[i * BLOCK_SIZE + j] = __viaddmax_s16x2((unsigned int) A[i * BLOCK_SIZE + k], (unsigned int) B[k * BLOCK_SIZE + j]);
+        C[y * BLOCK_SIZE + x] = min(C[y * BLOCK_SIZE + x], A[y * BLOCK_SIZE + k] + B[k * BLOCK_SIZE + x]);
         __syncthreads();
     }
 }
 
-__global__ void stage1(short *devMat, int startIdx, int n) {
-    __shared__ short mat[BLOCK_SIZE * BLOCK_SIZE];
+__device__ void block_APSP_stage3(int *C, int *A, int *B, int x, int y) {
+    for (int k = 0; k < BLOCK_SIZE; k++) {
+        // printf("%d %d %d %d %d %d\n", blockIdx.y, blockIdx.x, y, x, A[y * BLOCK_SIZE + k], B[k * BLOCK_SIZE + x]);
+        C[y * BLOCK_SIZE + x] = min(C[y * BLOCK_SIZE + x], A[k] + B[k]);
+    }
+}
+
+__global__ void stage1(int *devMat, int startIdx, int n) {
+    __shared__ int mat[BLOCK_SIZE * BLOCK_SIZE];
     // Start idx is the most left upper coordinate
     // Load adj. matrix from global memory to shared memory
-    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
-        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
-            mat[i * BLOCK_SIZE + j] = devMat[(startIdx + i) * n + (startIdx + j)];
-        }
-    }
+    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = devMat[(startIdx + threadIdx.y) * n + (startIdx + threadIdx.x)];
     __syncthreads();
 
     // Perform APSP on the block
     block_APSP(mat, mat, mat, threadIdx.x, threadIdx.y);
 
     // Write data back to global memory
-    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
-        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
-            devMat[(startIdx + i) * n + (startIdx + j)] = mat[i * BLOCK_SIZE + j];
-        }
-    }
-
-    //devMat[cursorY * n + cursorX] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
+    devMat[(startIdx + threadIdx.y) * n + (startIdx + threadIdx.x)] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
     __syncthreads();
 }
 
-__global__ void stage2_row(short *devMat, int startIdx, int n) {
+__global__ void stage2(int *devMat, int startIdx, int n) {
     // Load adj. matrix from global memory to shared memory
     // int cursorX = blockIdx.x * 32 + threadIdx.x;
     // int cursorY = startIdx + threadIdx.y;
@@ -52,63 +45,26 @@ __global__ void stage2_row(short *devMat, int startIdx, int n) {
     if ((blockIdx.x * BLOCK_SIZE) == startIdx)
         return;
 
-    // C[BLOCK_SIZE * BLOCK_SIZE], B[BLOCK_SIZE * BLOCK_SIZE]
-    __shared__ short mat[2 * BLOCK_SIZE * BLOCK_SIZE];
+    __shared__ int mat[3 * BLOCK_SIZE * BLOCK_SIZE];
 
     // Load adj. matrixs from global memory to shared memory
-    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
-        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
-            mat[i * BLOCK_SIZE + j] = devMat[(startIdx + i) * n + (blockIdx.x * BLOCK_SIZE + j)];
-            mat[i * BLOCK_SIZE + j + BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + i) * n + startIdx + j];
-        }
-    }
+    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = devMat[(startIdx + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)];
+    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + BLOCK_SIZE * BLOCK_SIZE] = devMat[(blockIdx.x * BLOCK_SIZE + threadIdx.y) * n + (startIdx + threadIdx.x)];
+    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + 2 * BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + threadIdx.y) * n + (startIdx + threadIdx.x)];
+
     __syncthreads();
 
     // Perform APSP on the block
-    block_APSP(mat, &mat[BLOCK_SIZE * BLOCK_SIZE], mat, threadIdx.x, threadIdx.y);
+    block_APSP(mat, &mat[2 * BLOCK_SIZE * BLOCK_SIZE], mat, threadIdx.x, threadIdx.y);
+    block_APSP(&mat[BLOCK_SIZE * BLOCK_SIZE], &mat[BLOCK_SIZE * BLOCK_SIZE], &mat[2 * BLOCK_SIZE * BLOCK_SIZE], threadIdx.x, threadIdx.y);
 
     // Write data back to global memory
-    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
-        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
-            devMat[(startIdx + i) * n + (blockIdx.x * BLOCK_SIZE + j)] = mat[i * BLOCK_SIZE + j];
-        }
-    }
+    devMat[(startIdx + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
+    devMat[(blockIdx.x * BLOCK_SIZE + threadIdx.y) * n + (startIdx + threadIdx.x)] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + BLOCK_SIZE * BLOCK_SIZE];
     __syncthreads();
 }
 
-__global__ void stage2_col(short *devMat, int startIdx, int n) {
-    // Load adj. matrix from global memory to shared memory
-    // int cursorX = startIdx + threadIdx.x;
-    // int cursorY = blockIdx.x * BLOCK_SIZE + threadIdx.y;
-    
-    if ((blockIdx.x * BLOCK_SIZE) == startIdx)
-        return;
-
-    // C[BLOCK_SIZE * BLOCK_SIZE], B[BLOCK_SIZE * BLOCK_SIZE]
-    __shared__ short mat[2 * BLOCK_SIZE * BLOCK_SIZE];
-
-    // Load adj. matrixs from global memory to shared memory
-    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
-        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
-            mat[i * BLOCK_SIZE + j] = devMat[(blockIdx.x * BLOCK_SIZE + i) * n + (startIdx + j)];
-            mat[i * BLOCK_SIZE + j + BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + i) * n + (startIdx + j)];
-        }
-    }
-    __syncthreads();
-
-    // Perform APSP on the block
-    block_APSP(mat, mat, &mat[BLOCK_SIZE * BLOCK_SIZE], threadIdx.x, threadIdx.y);
-
-    // Write data back to global memory
-    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
-        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
-            devMat[(blockIdx.x * BLOCK_SIZE + i) * n + (startIdx + j)] = mat[i * BLOCK_SIZE + j];
-        }
-    }
-    __syncthreads();
-}
-
-__global__ void stage3(short *devMat, int startIdx, int n) {
+__global__ void stage3(int *devMat, int startIdx, int n) {
     // Load adj. matrix from global memory to shared memory
     // int cursorX = blockIdx.x * BLOCK_SIZE + threadIdx.x;
     // int cursorY = blockIdx.y * BLOCK_SIZE + threadIdx.y;
@@ -117,37 +73,34 @@ __global__ void stage3(short *devMat, int startIdx, int n) {
         return;
 
     // C[BLOCK_SIZE * BLOCK_SIZE], B[BLOCK_SIZE * BLOCK_SIZE], A[BLOCK_SIZE * BLOCK_SIZE]
-    __shared__ short mat[3 * BLOCK_SIZE * BLOCK_SIZE];
+    __shared__ int mat[1 * BLOCK_SIZE * BLOCK_SIZE];
+    int B[BLOCK_SIZE];
+    int C[BLOCK_SIZE];
 
     // Load adj. matrixs from global memory to shared memory
-    for (int i = threadIdx.y; i < BLOCK_SIZE; i += blockDim.y) {
-        for (int j = threadIdx.x; j < BLOCK_SIZE; j += blockDim.x) {
-            mat[i * BLOCK_SIZE + j] = devMat[(blockIdx.y * BLOCK_SIZE + i) * n + (blockIdx.x * BLOCK_SIZE + j)];
-            mat[i * BLOCK_SIZE + j + BLOCK_SIZE * BLOCK_SIZE] = devMat[(blockIdx.y * BLOCK_SIZE + i) * n + (startIdx + j)];
-            mat[i * BLOCK_SIZE + j + 2 * BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + i) * n + (blockIdx.x * BLOCK_SIZE + j)];
-        }
+    mat[threadIdx.y * BLOCK_SIZE + threadIdx.x] = devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)];
+    //mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + BLOCK_SIZE * BLOCK_SIZE] = devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (startIdx + threadIdx.x)];
+    //mat[threadIdx.y * BLOCK_SIZE + threadIdx.x + 2 * BLOCK_SIZE * BLOCK_SIZE] = devMat[(startIdx + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)];
+    for (int i = 0; i < BLOCK_SIZE; i++) {
+        B[i] = devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (startIdx + i)];
+        C[i] = devMat[(startIdx + i) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)];
     }
 
     __syncthreads();
-    // long long int t2 = clock64();
-    // printf("%lld ", (t2 - t1));
+
     // Perform APSP on the block
-    block_APSP(mat, &mat[BLOCK_SIZE * BLOCK_SIZE], &mat[2 * BLOCK_SIZE * BLOCK_SIZE], threadIdx.x, threadIdx.y);
-    // long long int t3 = clock64();
-    // printf("%lld ", (t3 - t2));
+    block_APSP_stage3(mat, B, C, threadIdx.x, threadIdx.y);
+
     // Write data back to global memory
-    for (int i = threadIdx.y; i < BLOCK_SIZE; i += 32) {
-        for (int j = threadIdx.x; j < BLOCK_SIZE; j += 32) {
-            devMat[(blockIdx.y * BLOCK_SIZE + i) * n + (blockIdx.x * BLOCK_SIZE + j)] = mat[i * BLOCK_SIZE + j];
-        }
-    }
+    devMat[(blockIdx.y * BLOCK_SIZE + threadIdx.y) * n + (blockIdx.x * BLOCK_SIZE + threadIdx.x)] = mat[threadIdx.y * BLOCK_SIZE + threadIdx.x];
     __syncthreads();
+
     // long long int t4 = clock64();
     // printf("%lld ", (t4 - t3));
 }
 
 int main(int argc, char **argv) {
-    freopen("log.txt","w",stdout);
+    // freopen("log.txt","w",stdout);
     /* detect how many CPUs are available */
     // cpu_set_t cpu_set;
     // int ncpus;
@@ -164,10 +117,10 @@ int main(int argc, char **argv) {
 
     FILE *inFp = fopen(inputFile, "rb");
     FILE *outFp = fopen(outputFile, "wb");
-    if( inFp == NULL ) {
-        fprintf(stderr, "Couldn't open %s: %s\n", inputFile, strerror(errno));
-        exit(1);
-    }
+    // if( inFp == NULL ) {
+    //     fprintf(stderr, "Couldn't open %s: %s\n", inputFile, strerror(errno));
+    //     exit(1);
+    // }
     int verticesTotal;
     int edgesTotal;
     
@@ -177,31 +130,41 @@ int main(int argc, char **argv) {
     _ = fread(&edgesTotal, sizeof(int), 1, inFp);
     static int block_dim = (verticesTotal + BLOCK_SIZE - 1) / BLOCK_SIZE;
     static int n = BLOCK_SIZE * block_dim;
-printf("%d %d ", verticesTotal, edgesTotal);
+    // printf("%d %d ", verticesTotal, edgesTotal);
+
     // Create adjanency matrix
-    short *adjMat = (short *) malloc(n * n * sizeof(short));
+    int *adjMat = (int *) malloc(n * n * sizeof(int));
 
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n; j++) {
             if (i == j)
                 adjMat[i * n + j] = 0;
             else
-                adjMat[i * n + j] = 10000; // INF
+                adjMat[i * n + j] = INF;
         }
     }
 
     // Put edges into adjanency matrix
-    int tmp[3];
-    for (int i = 0; i < edgesTotal; i++) {
+    int tmp[15];
+    int i; 
+    for (i = 0; i < (edgesTotal - 5); i += 5) {
+        _ = fread(&tmp, sizeof(int), 15, inFp);
+        adjMat[tmp[0] * n + tmp[1]] = tmp[2];
+        adjMat[tmp[3] * n + tmp[4]] = tmp[5];
+        adjMat[tmp[6] * n + tmp[7]] = tmp[8];
+        adjMat[tmp[9] * n + tmp[10]] = tmp[11];
+        adjMat[tmp[12] * n + tmp[13]] = tmp[14];
+    }
+    for (i = i; i < edgesTotal; i += 1) {
         _ = fread(&tmp, sizeof(int), 3, inFp);
-        adjMat[tmp[0] * n + tmp[1]] = (short) tmp[2];
+        adjMat[tmp[0] * n + tmp[1]] = tmp[2];
     }
     fclose(inFp);
 
     // Print input graph
     // for (int i = 0; i < n; i++) {
     //     for (int j = 0; j < n; j++) {
-    //         if (adjMat[i * n + j] != 10000)
+    //         if (adjMat[i * n + j] != INF)
     //             std::cout << adjMat[i * n + j] << " ";
     //         else
     //             std::cout << "INF" << " ";
@@ -209,22 +172,22 @@ printf("%d %d ", verticesTotal, edgesTotal);
     //     std::cout << std::endl;
     // }
 
-    short* device_adjMat;
-    cudaMalloc((void **) &device_adjMat, n * n * sizeof(short));
+    int* device_adjMat;
+    cudaMalloc((void **) &device_adjMat, n * n * sizeof(int));
 
     // Put adjanency matrix to GPU
-    cudaMemcpy(device_adjMat, adjMat, n * n * sizeof(short), cudaMemcpyHostToDevice);
+    cudaMemcpy(device_adjMat, adjMat, n * n * sizeof(int), cudaMemcpyHostToDevice);
 
     // stages
     for (int k_start = 0; k_start < n; k_start += BLOCK_SIZE) {
-        stage1<<< 1, dim3(32, 32), 0 >>> (device_adjMat, k_start, n);
-        stage2_row<<< block_dim, dim3(32, 32), 0 >>> (device_adjMat, k_start, n);
-        stage2_col<<< block_dim, dim3(32, 32), 0 >>> (device_adjMat, k_start, n);
-        stage3<<< dim3(block_dim, block_dim), dim3(32, 32), 0 >>> (device_adjMat, k_start, n);
+        stage1<<< 1, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
+        stage2<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
+        // stage2_col<<< block_dim, dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
+        stage3<<< dim3(block_dim, block_dim), dim3(BLOCK_SIZE, BLOCK_SIZE), 0 >>> (device_adjMat, k_start, n);
     }
 
     // output
-    cudaMemcpy(adjMat, device_adjMat, n * n * sizeof(short), cudaMemcpyDeviceToHost);
+    cudaMemcpy(adjMat, device_adjMat, n * n * sizeof(int), cudaMemcpyDeviceToHost);
 
     // Print input graph
     // for (int i = 0; i < verticesTotal; i++) {
@@ -237,14 +200,9 @@ printf("%d %d ", verticesTotal, edgesTotal);
     //     std::cout << std::endl;
     // }
 
-    // for (int i = 0; i < verticesTotal; i++) {
-    //     for (int j = 0; j < verticesTotal; j++) {
-    //         int tmp = (int) adjMat[i * n + j];
-    //         if (tmp == 10000)
-    //             tmp = INF;
-    //         fwrite(&tmp, sizeof(int), 1, outFp);
-    //     }
-    // }
+    for (int i = 0; i < verticesTotal; i++) {
+        fwrite(&adjMat[i * n], sizeof(int), verticesTotal, outFp);
+    }
     fclose(outFp);
 
     return 0;
