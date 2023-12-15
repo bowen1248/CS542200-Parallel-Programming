@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdio.h>
+#include <omp.h>
 
 #define NUM_GPUS 2
 #define BLK_n 64
@@ -123,7 +124,7 @@ __global__ void stage3(int *devMat, int g_k, int n, int start_y) {
     int s_x = threadIdx.x;
     int s_y = threadIdx.y;
     int g_x = (blockIdx.x + (blockIdx.x >= (g_k >> log2BLK_n))) * BLK_n + s_x;
-    int g_y = (start_y + blockIdx.y + (blockIdx.y >= (g_k >> log2BLK_n))) * BLK_n + s_y;
+    int g_y = blockIdx.y * BLK_n + s_y + start_y;
 
     __shared__ int mat[2 * BLK_n * BLK_n];
 
@@ -214,27 +215,29 @@ int main(int argc, char **argv) {
 #pragma omp parallel num_threads(NUM_GPUS)
 {
     int id = omp_get_thread_num();
-    int start_y = ((block_dim + NUM_GPUS - 1) / NUM_GPUS) * id;
-    int row_n = (block_dim / NUM_GPUS) + ((block_dim % NUM_GPUS) > id);
+    int start_y = ((block_dim + NUM_GPUS - 1) / NUM_GPUS) * id * BLK_n;
+    int block_n = ((block_dim / NUM_GPUS) + ((block_dim % NUM_GPUS) > id));
+    
     cudaSetDevice(id);
     cudaMalloc((void **) &devMat[id], n * n * sizeof(int));
 
 #pragma omp barrier
     // Put adjanency matrix to GPU
-    cudaMemcpy(devMat[id][start_y * n], &adjMat[start_y * n], row_n * n * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(devMat[id] + (start_y * n), &adjMat[start_y * n], block_n * BLK_n * n * sizeof(int), cudaMemcpyHostToDevice);
 
     // stages
     for (int g_k = 0; g_k < n; g_k += BLK_n) {
-        int copy = (g_k >= start_y && g_k < (start_y + row_n));
-        cudaMemcpyPeer(Dist_GPU[!id][g_k * n], !id, Dist_GPU[id][g_k * n], id, copy * BLK_n * n * sizeof(int));
+        int copy = (g_k >= start_y && g_k < (start_y + block_n * BLK_n));
+        cudaMemcpyPeer(devMat[!id] + (g_k * n), !id, devMat[id] + (g_k * n), id, copy * BLK_n * n * sizeof(int));
 #pragma omp barrier
-        stage1<<< 1, dim3(THREAD_n, THREAD_n), 0 >>> (devMat, g_k, n);
-        stage2<<< dim3(block_dim - 1, 2), dim3(THREAD_n, THREAD_n), 0 >>> (devMat, g_k, n);
-        stage3<<< dim3(block_dim - 1, row_n), dim3(THREAD_n, THREAD_n), 0 >>> (devMat, g_k, n, start_y);
+        stage1<<< 1, dim3(THREAD_n, THREAD_n), 0 >>> (devMat[id], g_k, n);
+        stage2<<< dim3(block_dim - 1, 2), dim3(THREAD_n, THREAD_n), 0 >>> (devMat[id], g_k, n);
+        stage3<<< dim3(block_dim - 1, block_n), dim3(THREAD_n, THREAD_n), 0 >>> (devMat[id], g_k, n, start_y);
     }
 
     // output
-    cudaMemcpy(&adjMat[start_y * n], devMat[id][start_y * n], row_n * n * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaMemcpy(&adjMat[start_y * n], devMat[id] + (start_y * n), block_n * BLK_n * n * sizeof(int), cudaMemcpyDeviceToHost);
+    cudaFree(devMat[id]);
 }
     // Print input graph
     // for (int i = 0; i < verticesTotal; i++) {
