@@ -9,14 +9,11 @@
 
 int main(int argc, char **argv) {
     // freopen("log.txt","w",stdout);
-    /* detect how many CPUs are available */
+
     cpu_set_t cpu_set;
     int ncpus;
     sched_getaffinity(0, sizeof(cpu_set), &cpu_set);
     ncpus = CPU_COUNT(&cpu_set);
-
-    // // Thread handlers
-    // pthread_t threads[ncpus];
 
     /* argument parsing */
     assert(argc == 3);
@@ -52,16 +49,6 @@ int main(int argc, char **argv) {
         adjMat[tmp[0] * n + tmp[1]] = tmp[2];
     }
     fclose(inFp);
-    // Print input graph
-    // for (int i = 0; i < n; i++) {
-    //     for (int j = 0; j < n; j++) {
-    //         if (adjMat[i * n + j] != 1073741823)
-    //             std::cout << adjMat[i * n + j] << " ";
-    //         else
-    //             std::cout << "INF" << " ";
-    //     }
-    //     std::cout << std::endl;
-    // }
 
 #pragma omp parallel num_threads(ncpus) shared(adjMat)
 {
@@ -80,8 +67,7 @@ int main(int argc, char **argv) {
         }
         }
 
-        // stage 2
-        // row
+        // stage 2 row
         #pragma omp for schedule(dynamic) nowait 
         for (int x_start = 0; x_start < n; x_start += BLOCK_SIZE) {
             if (x_start == k_start)
@@ -99,7 +85,7 @@ int main(int argc, char **argv) {
             }
         }
 
-        // column
+        // stage 2 column
         #pragma omp for schedule(dynamic)
         for (int y_start = 0; y_start < n; y_start += BLOCK_SIZE) {
             if (y_start == k_start)
