@@ -21,8 +21,8 @@ endif
 .PHONY: test
 test: $(EXES)
 	@echo test on $(TESTCASE)
-	./$(EXES) /home/pp23/share/hw3-2/cases/$(TESTCASE) ./output/$(TESTCASE).out
-	./verify /home/pp23/share/hw3-2/cases/$(TESTCASE) /home/pp23/share/hw3-2/cases/$(TESTCASE).out ./output/$(TESTCASE).out
+	./$(EXES) /tmp/dataset-nthu-pp23/pp23/share/hw3-2/cases/$(TESTCASE) ./output/$(TESTCASE).out
+	./verify /tmp/dataset-nthu-pp23/pp23/share/hw3-2/cases/$(TESTCASE) /tmp/dataset-nthu-pp23/pp23/share/hw3-2/cases/$(TESTCASE).out ./output/$(TESTCASE).out
 
 # /home/pp23/share/hw3-2/
 # /tmp/dataset-nthu-pp23/pp23/share/hw3-2/

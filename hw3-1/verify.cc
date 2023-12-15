@@ -26,6 +26,20 @@ int main(int argc, char **argv) {
     FILE *inFp1 = fopen(inputFile, "rb");
     FILE *inFp2 = fopen(answerFile, "rb");
     FILE *inFp3 = fopen(userFile, "rb");
+    if( inFp1 == NULL ) {
+        fprintf(stderr, "Couldn't open %s: %s\n", inputFile, strerror(errno));
+        exit(1);
+    }
+    if( inFp2 == NULL ) {
+        fprintf(stderr, "Couldn't open %s: %s\n", answerFile, strerror(errno));
+        exit(1);
+    }
+    if( inFp3 == NULL ) {
+        fprintf(stderr, "Couldn't open %s: %s\n", userFile, strerror(errno));
+        exit(1);
+    }
+
+
     int verticesTotal;
     int edgesTotal;
     
@@ -34,11 +48,39 @@ int main(int argc, char **argv) {
 
     std::cout << verticesTotal << " " << edgesTotal << std::endl;
 
+    int *adjMat = (int *) calloc(verticesTotal * verticesTotal, sizeof(int));
     int *adjMat1 = (int *) calloc(verticesTotal * verticesTotal, sizeof(int));
     int *adjMat2 = (int *) calloc(verticesTotal * verticesTotal, sizeof(int));
 
     fread(adjMat1, sizeof(int), verticesTotal * verticesTotal, inFp2);
     fread(adjMat2, sizeof(int), verticesTotal * verticesTotal, inFp3);
+
+    for (int i = 0; i < verticesTotal; i++) {
+        for (int j = 0; j < verticesTotal; j++) {
+            if (i == j)
+                adjMat[i * verticesTotal + j] = 0;
+            else
+                adjMat[i * verticesTotal + j] = 1073741823;
+        }
+    }
+
+    // Put edges into adjanency matrix
+    int tmp[3];
+    for (int i = 0; i < edgesTotal; i++) {
+        fread(&tmp, sizeof(int), 3, inFp1);
+        adjMat[tmp[0] * verticesTotal + tmp[1]] = tmp[2];
+    }
+
+    std::cout << "Initial matrix: " << std::endl;
+    for (int i = 0; i < verticesTotal; i++) {
+        for (int j = 0; j < verticesTotal; j++) {
+            if (adjMat[i * verticesTotal + j] != 1073741823)
+                std::cout << adjMat[i * verticesTotal + j] << " ";
+            else
+                std::cout << "INF" << " ";
+        }
+        std::cout << std::endl;
+    }
 
     std::cout << "Standard answer matrix: " << std::endl;
     for (int i = 0; i < verticesTotal; i++) {
