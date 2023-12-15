@@ -4,9 +4,9 @@
 #include <math.h>
 #include <stdio.h>
 
-#define BLK_n 32
-#define log2BLK_n 5
-#define THREAD_NUMS 32
+#define BLK_n 64
+#define log2BLK_n 6
+#define THREAD_n 32
 #define INF 1073741823 // 2^30 - 1
 
 __global__ void stage1(int *devMat, int g_k, int n) {
@@ -21,15 +21,24 @@ __global__ void stage1(int *devMat, int g_k, int n) {
 
     // Load adj. matrix from global memory to shared memory
     mat[s_y * BLK_n + s_x] = devMat[g_y * n + g_x];
+    mat[s_y * BLK_n + (s_x + 32)] = devMat[g_y * n + (g_x + 32)];
+    mat[(s_y + 32) * BLK_n + s_x] = devMat[(g_y + 32) * n + g_x];
+    mat[(s_y + 32) * BLK_n + (s_x + 32)] = devMat[(g_y + 32) * n + (g_x + 32)];
 
     // Perform APSP on the block
     for (int k = 0; k < BLK_n; k++) {
         __syncthreads();
         mat[s_y * BLK_n + s_x] = min(mat[s_y * BLK_n + s_x], mat[s_y * BLK_n + k] + mat[k * BLK_n + s_x]);
+        mat[s_y * BLK_n + (s_x + 32)] = min(mat[s_y * BLK_n + (s_x + 32)], mat[s_y * BLK_n + k] + mat[k * BLK_n + (s_x + 32)]);
+        mat[(s_y + 32) * BLK_n + s_x] = min(mat[(s_y + 32) * BLK_n + s_x], mat[(s_y + 32) * BLK_n + k] + mat[k * BLK_n + s_x]);
+        mat[(s_y + 32) * BLK_n + (s_x + 32)] = min(mat[(s_y + 32) * BLK_n + (s_x + 32)], mat[(s_y + 32) * BLK_n + k] + mat[k * BLK_n + (s_x + 32)]);
     }
 
     // Write data back to global memory
     devMat[g_y * n + g_x] = mat[s_y * BLK_n + s_x];
+    devMat[g_y * n + (g_x + 32)] = mat[s_y * BLK_n + (s_x + 32)];
+    devMat[(g_y + 32) * n + g_x] = mat[(s_y + 32) * BLK_n + s_x];
+    devMat[(g_y + 32) * n + (g_x + 32)] = mat[(s_y + 32) * BLK_n + (s_x + 32)];
 }
 
 __global__ void stage2(int *devMat, int g_k, int n) {
@@ -47,29 +56,57 @@ __global__ void stage2(int *devMat, int g_k, int n) {
         int g_y = (blockIdx.x + (blockIdx.x >= (g_k >> log2BLK_n))) * BLK_n + s_y;
 
         mat[s_y * BLK_n + s_x] =  devMat[g_y * n + g_x];
+        mat[s_y * BLK_n + (s_x + 32)] =  devMat[g_y * n + (g_x + 32)];
+        mat[(s_y + 32) * BLK_n + s_x] =  devMat[(g_y + 32) * n + g_x];
+        mat[(s_y + 32) * BLK_n + (s_x + 32)] =  devMat[(g_y + 32) * n + (g_x + 32)];
+        
         mat[s_y * BLK_n + s_x + BLK_n * BLK_n] = devMat[(g_k + s_y) * n + g_x];
+        mat[s_y * BLK_n + (s_x + 32) + BLK_n * BLK_n] = devMat[(g_k + s_y) * n + (g_x + 32)];
+        mat[(s_y + 32) * BLK_n + s_x + BLK_n * BLK_n] = devMat[(g_k + s_y + 32) * n + g_x];
+        mat[(s_y + 32) * BLK_n + (s_x + 32) + BLK_n * BLK_n] = devMat[(g_k + s_y + 32) * n + (g_x + 32)];
 
         for (int k = 0; k < BLK_n; k++) {
             __syncthreads();
             mat[s_y * BLK_n + s_x] = min(mat[s_y * BLK_n + s_x], mat[s_y * BLK_n + k] + mat[k * BLK_n + s_x + BLK_n * BLK_n]);
+            mat[s_y * BLK_n + (s_x + 32)] = min(mat[s_y * BLK_n + (s_x + 32)], mat[s_y * BLK_n + k] + mat[k * BLK_n + (s_x + 32) + BLK_n * BLK_n]);
+            mat[(s_y + 32) * BLK_n + s_x] = min(mat[(s_y + 32) * BLK_n + s_x], mat[(s_y + 32) * BLK_n + k] + mat[k * BLK_n + s_x + BLK_n * BLK_n]);
+            mat[(s_y + 32) * BLK_n + (s_x + 32)] = min(mat[(s_y + 32) * BLK_n + (s_x + 32)], mat[(s_y + 32) * BLK_n + k] + mat[k * BLK_n + (s_x + 32) + BLK_n * BLK_n]);
         }
 
         // Write data back to global memory
         devMat[g_y * n + g_x] = mat[s_y * BLK_n + s_x];
+        devMat[g_y * n + (g_x + 32)] = mat[s_y * BLK_n + (s_x + 32)];
+        devMat[(g_y + 32) * n + g_x] = mat[(s_y + 32) * BLK_n + s_x];
+        devMat[(g_y + 32) * n + (g_x + 32)] = mat[(s_y + 32) * BLK_n + (s_x + 32)];
     } else {
         // row
         int g_x = (blockIdx.x + (blockIdx.x >= (g_k >> log2BLK_n))) * BLK_n + s_x;
         int g_y = g_k + s_y;
 
         mat[s_y * BLK_n + s_x] = devMat[g_y * n + g_x];
+        mat[s_y * BLK_n + (s_x + 32)] = devMat[g_y * n + (g_x + 32)];
+        mat[(s_y + 32) * BLK_n + s_x] = devMat[(g_y + 32) * n + g_x];
+        mat[(s_y + 32) * BLK_n + (s_x + 32)] = devMat[(g_y + 32) * n + (g_x + 32)];
+        
         mat[s_y * BLK_n + s_x + BLK_n * BLK_n] = devMat[g_y * n + (g_k + s_x)];
+        mat[s_y * BLK_n + (s_x + 32) + BLK_n * BLK_n] = devMat[g_y * n + (g_k + s_x + 32)];
+        mat[(s_y + 32) * BLK_n + s_x + BLK_n * BLK_n] = devMat[(g_y + 32) * n + (g_k + s_x)];
+        mat[(s_y + 32) * BLK_n + (s_x + 32) + BLK_n * BLK_n] = devMat[(g_y + 32) * n + (g_k + s_x + 32)];
+
+
         for (int k = 0; k < BLK_n; k++) {
             __syncthreads();
             mat[s_y * BLK_n + s_x] = min(mat[s_y * BLK_n + s_x], mat[s_y * BLK_n + k + BLK_n * BLK_n] + mat[k * BLK_n + s_x]);
+            mat[s_y * BLK_n + (s_x + 32)] = min(mat[s_y * BLK_n + (s_x + 32)], mat[s_y * BLK_n + k + BLK_n * BLK_n] + mat[k * BLK_n + (s_x + 32)]);
+            mat[(s_y + 32) * BLK_n + s_x] = min(mat[(s_y + 32) * BLK_n + s_x], mat[(s_y + 32) * BLK_n + k + BLK_n * BLK_n] + mat[k * BLK_n + s_x]);
+            mat[(s_y + 32) * BLK_n + (s_x + 32)] = min(mat[(s_y + 32) * BLK_n + (s_x + 32)], mat[(s_y + 32) * BLK_n + k + BLK_n * BLK_n] + mat[k * BLK_n + (s_x + 32)]);
         }
 
         // Write data back to global memory
         devMat[g_y * n + g_x] = mat[s_y * BLK_n + s_x];
+        devMat[g_y * n + (g_x + 32)] = mat[s_y * BLK_n + (s_x + 32)];
+        devMat[(g_y + 32) * n + g_x] = mat[(s_y + 32) * BLK_n + s_x];
+        devMat[(g_y + 32) * n + (g_x + 32)] = mat[(s_y + 32) * BLK_n + (s_x + 32)];
     }
 }
 
@@ -83,19 +120,36 @@ __global__ void stage3(int *devMat, int g_k, int n) {
     __shared__ int mat[2 * BLK_n * BLK_n];
 
     // Load adj. matrixs from global memory to shared memory
-    int num = devMat[g_y * n + g_x];
+    int num1 = devMat[g_y * n + g_x];
+    int num2 = devMat[g_y * n + (g_x + 32)];
+    int num3 = devMat[(g_y + 32) * n + g_x];
+    int num4 = devMat[(g_y + 32) * n + (g_x + 32)];
+
     mat[s_y * BLK_n + s_x] = devMat[g_y * n + (g_k + s_x)];
+    mat[s_y * BLK_n + (s_x + 32)] = devMat[g_y * n + (g_k + s_x + 32)];
+    mat[(s_y + 32) * BLK_n + s_x] = devMat[(g_y + 32) * n + (g_k + s_x)];
+    mat[(s_y + 32) * BLK_n + (s_x + 32)] = devMat[(g_y + 32) * n + (g_k + s_x + 32)];
+
     mat[s_y * BLK_n + s_x + BLK_n * BLK_n] = devMat[(g_k + s_y) * n + g_x];
+    mat[s_y * BLK_n + (s_x + 32) + BLK_n * BLK_n] = devMat[(g_k + s_y) * n + (g_x + 32)];
+    mat[(s_y + 32) * BLK_n + s_x + BLK_n * BLK_n] = devMat[(g_k + s_y + 32) * n + g_x];
+    mat[(s_y + 32) * BLK_n + (s_x + 32) + BLK_n * BLK_n] = devMat[(g_k + s_y + 32) * n + (g_x + 32)];
+
     __syncthreads();
 
     // Perform APSP on the block
     for (int k = 0; k < BLK_n; k++) {
-        num = min(num, mat[s_y * BLK_n + k] + mat[k * BLK_n + s_x + BLK_n * BLK_n]);
+        num1 = min(num1, mat[s_y * BLK_n + k] + mat[k * BLK_n + s_x + BLK_n * BLK_n]);
+        num2 = min(num2, mat[s_y * BLK_n + k] + mat[k * BLK_n + (s_x + 32) + BLK_n * BLK_n]);
+        num3 = min(num3, mat[(s_y + 32) * BLK_n + k] + mat[k * BLK_n + s_x + BLK_n * BLK_n]);
+        num4 = min(num4, mat[(s_y + 32) * BLK_n + k] + mat[k * BLK_n + (s_x + 32) + BLK_n * BLK_n]);
     }
 
     // Write data back to global memory
-    devMat[g_y * n + g_x] = num;
-    __syncthreads();
+    devMat[g_y * n + g_x] = num1;
+    devMat[g_y * n + (g_x + 32)] = num2;
+    devMat[(g_y + 32) * n + g_x] = num3;
+    devMat[(g_y + 32) * n + (g_x + 32)] = num4;
     // long long int t4 = clock64();
     // printf("%lld ", (t4 - t3));
 }
@@ -168,9 +222,9 @@ int main(int argc, char **argv) {
 
     // stages
     for (int g_k = 0; g_k < n; g_k += BLK_n) {
-        stage1<<< 1, dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (devMat, g_k, n);
-        stage2<<< dim3(block_dim - 1, 2), dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (devMat, g_k, n);
-        stage3<<< dim3(block_dim - 1, block_dim - 1), dim3(THREAD_NUMS, THREAD_NUMS), 0 >>> (devMat, g_k, n);
+        stage1<<< 1, dim3(THREAD_n, THREAD_n), 0 >>> (devMat, g_k, n);
+        stage2<<< dim3(block_dim - 1, 2), dim3(THREAD_n, THREAD_n), 0 >>> (devMat, g_k, n);
+        stage3<<< dim3(block_dim - 1, block_dim - 1), dim3(THREAD_n, THREAD_n), 0 >>> (devMat, g_k, n);
     }
 
     // output
