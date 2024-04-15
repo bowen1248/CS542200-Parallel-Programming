@@ -1,0 +1,68 @@
+[1mdiff --git a/src/ucp/core/ucp_worker.c b/src/ucp/core/ucp_worker.c[m
+[1mindex 5adcee9..ab89197 100644[m
+[1m--- a/src/ucp/core/ucp_worker.c[m
+[1m+++ b/src/ucp/core/ucp_worker.c[m
+[36m@@ -38,7 +38,6 @@[m
+ #include <sys/timerfd.h>[m
+ #include <time.h>[m
+ [m
+[31m-[m
+ #define UCP_WORKER_KEEPALIVE_ITER_SKIP 32[m
+ [m
+ #define UCP_WORKER_MAX_DEBUG_STRING_SIZE 200[m
+[36m@@ -1852,6 +1851,8 @@[m [mucp_worker_print_used_tls(ucp_worker_h worker, ucp_worker_cfg_index_t cfg_index)[m
+ [m
+     ucs_string_buffer_rtrim(&strb, "; ");[m
+ [m
+[32m+[m[32m    ucp_config_print(NULL, stdout, NULL, UCS_CONFIG_PRINT_TLS);[m
+[32m+[m[32m    printf("%s\n", ucs_string_buffer_cstr(&strb));[m
+     ucs_info("%s", ucs_string_buffer_cstr(&strb));[m
+ }[m
+ [m
+[1mdiff --git a/src/ucs/config/parser.c b/src/ucs/config/parser.c[m
+[1mindex 82bc04b..0b96015 100644[m
+[1m--- a/src/ucs/config/parser.c[m
+[1m+++ b/src/ucs/config/parser.c[m
+[36m@@ -1878,8 +1878,27 @@[m [mvoid ucs_config_parser_print_opts(FILE *stream, const char *title, const void *o[m
+     }[m
+ [m
+     // TODO: PP-HW4[m
+[31m-    if (flags /*& UCS_CONFIG_PRINT_TLS*/) {[m
+[32m+[m[32m    if (flags & UCS_CONFIG_PRINT_TLS) {[m
+[32m+[m[32m        char **envp, *envstr;[m
+[32m+[m[32m        char *var_name;[m
+[32m+[m[32m        char *saveptr;[m
+ [m
+[32m+[m[32m        pthread_mutex_lock(&ucs_config_parser_env_vars_hash_lock);[m
+[32m+[m
+[32m+[m[32m        for (envp = environ; *envp != NULL; ++envp) {[m
+[32m+[m[32m            envstr = ucs_strdup(*envp, "env_str");[m
+[32m+[m[32m            if (envstr == NULL) {[m
+[32m+[m[32m                continue;[m
+[32m+[m[32m            }[m
+[32m+[m
+[32m+[m[32m            var_name = strtok_r(envstr, "=", &saveptr);[m
+[32m+[m[32m            if (strncmp("UCX_TLS", var_name, 7) == 0)[m
+[32m+[m[32m                printf("%s\n", *envp);[m
+[32m+[m
+[32m+[m[32m            ucs_free(envstr);[m
+[32m+[m[32m        }[m
+[32m+[m
+[32m+[m[32m        pthread_mutex_unlock(&ucs_config_parser_env_vars_hash_lock);[m
+     }[m
+ [m
+     if (flags & UCS_CONFIG_PRINT_HEADER) {[m
+[1mdiff --git a/src/ucs/config/types.h b/src/ucs/config/types.h[m
+[1mindex c300a6b..f6b93cb 100644[m
+[1m--- a/src/ucs/config/types.h[m
+[1m+++ b/src/ucs/config/types.h[m
+[36m@@ -90,7 +90,8 @@[m [mtypedef enum {[m
+     UCS_CONFIG_PRINT_HEADER          = UCS_BIT(1),[m
+     UCS_CONFIG_PRINT_DOC             = UCS_BIT(2),[m
+     UCS_CONFIG_PRINT_HIDDEN          = UCS_BIT(3),[m
+[31m-    UCS_CONFIG_PRINT_COMMENT_DEFAULT = UCS_BIT(4)[m
+[32m+[m[32m    UCS_CONFIG_PRINT_COMMENT_DEFAULT = UCS_BIT(4),[m
+[32m+[m[32m    UCS_CONFIG_PRINT_TLS = UCS_BIT(5)[m
+ } ucs_config_print_flags_t;[m
+ [m
+ [m
